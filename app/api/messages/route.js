@@ -1,4 +1,5 @@
-import { createClient } from '@libsql/client'
+import { createClient } from '@libsql/client/http'
+
 
 function getClient() {
   return createClient({
