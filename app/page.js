@@ -1,235 +1,238 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import Link from 'next/link'
+import { CLASSES, STORY, rollD6, computeEndingTier } from '../lib/gameData'
+
+const STAT_LABEL = { str: '力量', wis: '智慧', agi: '敏捷' }
 
 export default function Home() {
-  const [messages, setMessages] = useState([])
-  const [input, setInput] = useState('')
-  const [author, setAuthor] = useState('Chuck')
-  const [loading, setLoading] = useState(false)
-  const [status, setStatus] = useState('')
+  const [phase, setPhase] = useState('menu')
+  const [name, setName] = useState('')
+  const [classId, setClassId] = useState(null)
+  const [hero, setHero] = useState(null)
+  const [sceneId, setSceneId] = useState('intro')
+  const [hp, setHp] = useState(0)
+  const [score, setScore] = useState(0)
+  const [flags, setFlags] = useState({})
+  const [result, setResult] = useState(null)
+  const [saving, setSaving] = useState(false)
 
-  const fetchMessages = async () => {
-    const res = await fetch('/api/messages')
-    const data = await res.json()
-    if (data.success) setMessages(data.messages)
+  const startCreate = () => setPhase('create')
+
+  const startAdventure = () => {
+    const chosenClass = CLASSES.find((c) => c.id === classId)
+    setHero(chosenClass)
+    setHp(chosenClass.hp)
+    setScore(0)
+    setFlags({})
+    setSceneId('intro')
+    setResult(null)
+    setPhase('play')
   }
 
-  useEffect(() => { fetchMessages() }, [])
-
-  const sendMessage = async () => {
-    if (!input.trim()) return
-    setLoading(true)
-    setStatus('')
-    const res = await fetch('/api/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: input, author }),
-    })
-    const data = await res.json()
-    if (data.success) {
-      setStatus('✅ 已儲存到 Turso！')
-      setInput('')
-      fetchMessages()
-    } else {
-      setStatus('❌ 錯誤：' + data.error)
+  const chooseOption = (choice) => {
+    if (choice.type === 'auto') {
+      setResult({ text: choice.text, next: choice.next, scoreGain: choice.score || 0, flag: choice.flag })
+      return
     }
-    setLoading(false)
+    const statValue = hero[choice.stat]
+    const roll = rollD6()
+    const bonus = choice.bonusFlag && flags[choice.bonusFlag] ? 1 : 0
+    const total = roll + statValue + bonus
+    const success = total >= choice.difficulty
+    setResult({
+      roll,
+      statValue,
+      bonus,
+      total,
+      difficulty: choice.difficulty,
+      statLabel: STAT_LABEL[choice.stat],
+      success,
+      text: success ? choice.successText : choice.failText,
+      next: choice.next,
+      scoreGain: success ? 1 : 0,
+      hpLoss: !success ? choice.failHp || 0 : 0,
+    })
   }
 
-  return (
-    <>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-          background: #0a0a0f;
-          min-height: 100vh;
-          font-family: 'Orbitron', sans-serif;
-          overflow-x: hidden;
-        }
-        .scanlines {
-          position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-          background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.05) 2px, rgba(0,0,0,0.05) 4px);
-          pointer-events: none; z-index: 0;
-        }
-        .container {
-          position: relative; z-index: 1;
-          max-width: 800px; margin: 0 auto;
-          padding: 40px 20px; text-align: center;
-        }
-        .title {
-          font-size: clamp(2.5rem, 8vw, 5rem);
-          font-weight: 900; letter-spacing: 0.1em;
-          line-height: 1.2; margin-bottom: 10px;
-        }
-        .hello { 
-          color: #ff2d78;
-          text-shadow: 0 0 10px #ff2d78, 0 0 30px #ff2d78, 0 0 60px #ff2d78, 0 0 100px #ff006e;
-          animation: flicker1 3s infinite alternate;
-        }
-        .world { 
-          color: #00f5ff;
-          text-shadow: 0 0 10px #00f5ff, 0 0 30px #00f5ff, 0 0 60px #00f5ff, 0 0 100px #0066ff;
-          animation: flicker2 2.5s infinite alternate;
-        }
-        .from {
-          font-size: clamp(1rem, 3vw, 1.5rem);
-          color: #ffd700;
-          text-shadow: 0 0 10px #ffd700, 0 0 30px #ffd700, 0 0 60px #ff9500;
-          letter-spacing: 0.3em;
-          margin-bottom: 40px;
-          animation: flicker3 4s infinite alternate;
-        }
-        .db-badge {
-          display: inline-block;
-          border: 1px solid #00f5ff;
-          border-radius: 20px;
-          padding: 5px 18px;
-          font-size: 0.65rem;
-          color: #00f5ff;
-          box-shadow: 0 0 10px #00f5ff44;
-          margin-bottom: 40px;
-          letter-spacing: 0.2em;
-        }
-        .card {
-          background: rgba(255,255,255,0.03);
-          border: 1px solid rgba(0,245,255,0.2);
-          border-radius: 16px;
-          padding: 30px;
-          margin-bottom: 30px;
-          box-shadow: 0 0 30px rgba(0,245,255,0.05);
-        }
-        .card h2 {
-          color: #00f5ff;
-          font-size: 0.9rem;
-          letter-spacing: 0.2em;
-          margin-bottom: 20px;
-          text-shadow: 0 0 10px #00f5ff;
-        }
-        .input-row {
-          display: flex; gap: 10px; flex-wrap: wrap;
-          justify-content: center; margin-bottom: 10px;
-        }
-        input {
-          flex: 1; min-width: 200px;
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,45,120,0.4);
-          border-radius: 8px;
-          color: #fff;
-          font-family: 'Orbitron', sans-serif;
-          font-size: 0.8rem;
-          padding: 10px 16px;
-          outline: none;
-          transition: border-color 0.3s, box-shadow 0.3s;
-        }
-        input:focus {
-          border-color: #ff2d78;
-          box-shadow: 0 0 15px rgba(255,45,120,0.3);
-        }
-        input::placeholder { color: rgba(255,255,255,0.3); }
-        button {
-          background: transparent;
-          border: 1px solid #ff2d78;
-          border-radius: 8px;
-          color: #ff2d78;
-          font-family: 'Orbitron', sans-serif;
-          font-size: 0.8rem;
-          padding: 10px 24px;
-          cursor: pointer;
-          text-shadow: 0 0 10px #ff2d78;
-          box-shadow: 0 0 15px rgba(255,45,120,0.2);
-          transition: all 0.3s;
-          letter-spacing: 0.1em;
-        }
-        button:hover {
-          background: rgba(255,45,120,0.1);
-          box-shadow: 0 0 25px rgba(255,45,120,0.5);
-        }
-        button:disabled { opacity: 0.4; cursor: not-allowed; }
-        .status {
-          font-size: 0.75rem;
-          color: #ffd700;
-          letter-spacing: 0.1em;
-          min-height: 20px;
-          margin-top: 5px;
-        }
-        .msg-list { text-align: left; }
-        .msg-item {
-          border-bottom: 1px solid rgba(255,255,255,0.05);
-          padding: 12px 0;
-        }
-        .msg-item:last-child { border-bottom: none; }
-        .msg-content {
-          color: #fff;
-          font-size: 0.85rem;
-          margin-bottom: 4px;
-        }
-        .msg-meta {
-          font-size: 0.65rem;
-          color: rgba(255,255,255,0.3);
-          letter-spacing: 0.1em;
-        }
-        .msg-author { color: #ff2d78; text-shadow: 0 0 8px #ff2d78; }
-        .empty { color: rgba(255,255,255,0.2); font-size: 0.8rem; padding: 20px; }
-        @keyframes flicker1 {
-          0%,95% { opacity: 1; } 96% { opacity: 0.8; } 97% { opacity: 1; } 98% { opacity: 0.6; } 100% { opacity: 1; }
-        }
-        @keyframes flicker2 {
-          0%,90% { opacity: 1; } 91% { opacity: 0.7; } 92% { opacity: 1; } 98% { opacity: 0.9; } 100% { opacity: 1; }
-        }
-        @keyframes flicker3 {
-          0%,97% { opacity: 1; } 98% { opacity: 0.5; } 99% { opacity: 1; } 100% { opacity: 0.9; }
-        }
-      `}</style>
+  const continueStory = async () => {
+    if (!result) return
+    const nextScore = score + (result.scoreGain || 0)
+    const nextHp = Math.max(1, hp - (result.hpLoss || 0))
+    const nextFlags = result.flag ? { ...flags, [result.flag]: true } : flags
+    setScore(nextScore)
+    setHp(nextHp)
+    setFlags(nextFlags)
+    setResult(null)
 
-      <div className="scanlines" />
-      <div className="container">
-        <div className="title">
-          <span className="hello">HELLO </span>
-          <span className="world">WORLD</span>
-        </div>
-        <div className="from">— FROM CHUCK —</div>
-        <div className="db-badge">⚡ POWERED BY TURSO DATABASE</div>
+    if (result.next === 'ending') {
+      setPhase('end')
+      setSaving(true)
+      const tier = computeEndingTier(nextScore)
+      try {
+        await fetch('/api/adventures', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            heroName: name,
+            className: hero.name,
+            tierTitle: tier.title,
+            score: nextScore,
+          }),
+        })
+      } catch (e) {
+        // saving is optional; the celebration still happens offline
+      }
+      setSaving(false)
+    } else {
+      setSceneId(result.next)
+    }
+  }
 
-        <div className="card">
-          <h2>▌ 新增訊息到資料庫</h2>
-          <div className="input-row">
-            <input
-              value={author}
-              onChange={e => setAuthor(e.target.value)}
-              placeholder="作者"
-              style={{ maxWidth: '150px', flex: 'none' }}
-            />
-            <input
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder="輸入你的訊息..."
-              onKeyDown={e => e.key === 'Enter' && sendMessage()}
-            />
-            <button onClick={sendMessage} disabled={loading}>
-              {loading ? 'SAVING...' : 'SEND'}
+  const playAgain = () => {
+    setPhase('menu')
+    setName('')
+    setClassId(null)
+    setHero(null)
+  }
+
+  if (phase === 'menu') {
+    return (
+      <div className="wrap">
+        <h1>🌲 小小勇者跑團 🐲</h1>
+        <div className="subtitle">一場獻給孩子們的溫暖文字冒險</div>
+        <div className="card" style={{ textAlign: 'center' }}>
+          <p style={{ marginBottom: 16, lineHeight: 1.7 }}>
+            森林裡有一隻迷路的小龍，牠好想回家！
+            <br />
+            挑選一位小英雄，陪牠一起穿越森林，交到新朋友，完成一場溫馨的冒險吧！
+          </p>
+          <div className="btn-row">
+            <button className="btn" onClick={startCreate}>
+              🚀 開始新冒險
             </button>
-          </div>
-          <div className="status">{status}</div>
-        </div>
-
-        <div className="card">
-          <h2>▌ 資料庫訊息紀錄</h2>
-          <div className="msg-list">
-            {messages.length === 0 ? (
-              <div className="empty">尚無訊息 — 快來新增第一筆！</div>
-            ) : messages.map((m, i) => (
-              <div className="msg-item" key={i}>
-                <div className="msg-content">{m.content}</div>
-                <div className="msg-meta">
-                  <span className="msg-author">{m.author}</span>
-                  {' · '}{new Date(m.created_at).toLocaleString('zh-TW')}
-                </div>
-              </div>
-            ))}
+            <Link className="btn btn-secondary" href="/records">
+              📜 查看冒險紀錄
+            </Link>
           </div>
         </div>
       </div>
-    </>
-  )
+    )
+  }
+
+  if (phase === 'create') {
+    return (
+      <div className="wrap">
+        <h1>✨ 建立你的小英雄</h1>
+        <div className="card">
+          <label style={{ fontWeight: 700, display: 'block', marginBottom: 8 }}>你的名字是？</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="輸入英雄的名字"
+            maxLength={12}
+          />
+        </div>
+        <div className="card">
+          <label style={{ fontWeight: 700, display: 'block', marginBottom: 8 }}>選擇你的職業</label>
+          <div className="class-grid">
+            {CLASSES.map((c) => (
+              <button
+                key={c.id}
+                className={`class-card${classId === c.id ? ' selected' : ''}`}
+                onClick={() => setClassId(c.id)}
+              >
+                <div className="emoji">{c.emoji}</div>
+                <div className="name">{c.name}</div>
+                <div className="desc">{c.desc}</div>
+              </button>
+            ))}
+          </div>
+          <div className="btn-row">
+            <button
+              className="btn"
+              disabled={!name.trim() || !classId}
+              onClick={startAdventure}
+            >
+              🐲 出發尋找小龍的家！
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (phase === 'play') {
+    const scene = STORY[sceneId]
+    return (
+      <div className="wrap">
+        <h1>🌲 小小勇者跑團 🐲</h1>
+        <div className="statbar">
+          <span className="stat-pill">{hero.emoji} {name}</span>
+          <span className="stat-pill">❤️ HP {hp}</span>
+          <span className="stat-pill">⭐ 友誼點數 {score}</span>
+        </div>
+        <div className="card">
+          <div className="scene-emoji">{scene.emoji}</div>
+          <div className="scene-text">{scene.text}</div>
+
+          {!result &&
+            scene.choices.map((choice, i) => (
+              <button key={i} className="choice-btn" onClick={() => chooseOption(choice)}>
+                {choice.label}
+              </button>
+            ))}
+
+          {result && (
+            <div className="result-box">
+              {typeof result.roll === 'number' && (
+                <p style={{ marginBottom: 8 }}>
+                  🎲 骰子擲出 <span className="dice-roll">{result.roll}</span> 點！加上{' '}
+                  {result.statLabel} {result.statValue}
+                  {result.bonus ? ` + 松鼠夥伴加成 ${result.bonus}` : ''}，總共{' '}
+                  <span className="dice-roll">{result.total}</span> 點（需要 {result.difficulty} 點）
+                </p>
+              )}
+              <p style={{ marginBottom: 12 }}>{result.text}</p>
+              <button className="btn" onClick={continueStory}>
+                繼續冒險 ➡️
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (phase === 'end') {
+    const tier = computeEndingTier(score)
+    return (
+      <div className="wrap">
+        <h1>🎉 冒險完成！</h1>
+        <div className="card" style={{ textAlign: 'center' }}>
+          <div className="scene-emoji">🏡🐲</div>
+          <p style={{ marginBottom: 12, lineHeight: 1.7 }}>
+            你和 {name} 終於把小龍送回了山谷裡的家，龍爸爸和龍媽媽感動得流下眼淚，緊緊擁抱著你們，
+            並邀請大家一起參加森林裡最熱鬧的慶祝派對！
+          </p>
+          <p style={{ fontSize: '1.3rem', fontWeight: 800, color: '#ff6b6b' }}>
+            {tier.stars} {tier.title} {tier.stars}
+          </p>
+          <p style={{ marginBottom: 16 }}>友誼點數：⭐ {score}</p>
+          {saving && <p style={{ color: '#999', fontSize: '0.85rem' }}>正在紀錄你的冒險...</p>}
+          <div className="btn-row">
+            <button className="btn" onClick={playAgain}>
+              🔁 再玩一次
+            </button>
+            <Link className="btn btn-secondary" href="/records">
+              📜 查看冒險紀錄
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return null
 }
