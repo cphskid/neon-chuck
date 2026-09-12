@@ -1,0 +1,1305 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>東寧遺事：鄭荷台灣記</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Noto+Serif+TC:wght@600;900&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0f1013;
+    --panel:#241a14;
+    --panel-edge:#4a3324;
+    --panel-edge-lit:#6b4a30;
+    --gold:#e8c468;
+    --gold-dim:#a9863f;
+    --paper:#f0e0c0;
+    --food:#7fae4a;
+    --military:#c23b22;
+    --reputation:#3f7cac;
+    --wealth:#d4a72c;
+    --sky-top:#101a33;
+    --sky-bottom:#e8935a;
+    --accent:#c23b22;
+    --danger:#c23b22;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none;}
+  .hidden{display:none !important;}
+  html,body{
+    height:100%; margin:0; overflow:hidden; background:#000; color:var(--paper);
+    font-family:'VT323',monospace; font-size:20px;
+  }
+  .pixel-font{ font-family:'Press Start 2P', monospace; }
+  #app{
+    position:fixed; inset:0; display:flex; flex-direction:column;
+    background:#000;
+  }
+
+  /* ---------- HUD ---------- */
+  #hud{
+    flex:0 0 auto; display:flex; align-items:center; gap:10px;
+    padding:6px 10px; background:linear-gradient(180deg,#1a120c,#0f0a07);
+    border-bottom:2px solid var(--panel-edge); z-index:20;
+  }
+  #hud .stat{ display:flex; align-items:center; gap:4px; flex:1; min-width:0; }
+  #hud .stat .icon{ font-size:14px; flex:0 0 auto; }
+  #hud .stat .track{ flex:1; height:8px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:2px; overflow:hidden; min-width:20px; }
+  #hud .stat .fill{ height:100%; transition:width .5s ease; }
+  #hud .stat .num{ font-family:'Press Start 2P',monospace; font-size:8px; color:var(--paper); flex:0 0 auto; width:20px; text-align:right; }
+  #hud .chtitle{
+    font-family:'Press Start 2P',monospace; font-size:8px; color:var(--gold-dim);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:34vw; flex:0 0 auto;
+    cursor:pointer; padding:2px 4px;
+  }
+
+  /* ---------- Canvas stage ---------- */
+  #stage{ position:relative; flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; background:#000; overflow:hidden; }
+  #gameCanvas{ image-rendering:pixelated; image-rendering:crisp-edges; display:block; background:#101a33; }
+
+  .prompt-toast{
+    position:absolute; top:8px; left:50%; transform:translateX(-50%);
+    background:rgba(15,16,19,0.9); border:1px solid var(--gold-dim); color:var(--gold);
+    padding:4px 12px; font-size:14px; border-radius:3px; pointer-events:none; opacity:0; transition:opacity .3s;
+    z-index:15; white-space:nowrap;
+  }
+  .prompt-toast.show{ opacity:1; }
+
+  /* ---------- Touch controls ---------- */
+  #touchControls{ position:absolute; inset:0; pointer-events:none; z-index:12; }
+  .tbtn{
+    position:absolute; pointer-events:auto; width:56px; height:56px; border-radius:50%;
+    background:rgba(232,196,104,0.14); border:2px solid rgba(232,196,104,0.55);
+    color:var(--gold); font-size:22px; display:flex; align-items:center; justify-content:center;
+    -webkit-user-select:none;
+  }
+  .tbtn:active{ background:rgba(232,196,104,0.32); }
+  #btnLeft{ left:14px; bottom:14px; }
+  #btnRight{ left:80px; bottom:14px; }
+  #btnInteract{ right:14px; bottom:14px; width:64px; height:64px; font-size:14px; font-family:'Press Start 2P',monospace; text-align:center; line-height:1.2; }
+
+  /* ---------- Dialogue panel ---------- */
+  #dialoguePanel{
+    flex:0 0 auto; background:linear-gradient(180deg,#2a1c14,#180f0a);
+    border-top:3px solid var(--panel-edge-lit); padding:10px 12px 12px; z-index:20;
+    display:flex; flex-direction:column; gap:6px;
+  }
+  #dlgHeader{ display:flex; align-items:center; gap:10px; }
+  #dlgPortrait{ width:42px; height:42px; border-radius:4px; border:2px solid var(--gold-dim); background:#101a33; flex:0 0 auto; }
+  #dlgName{ font-family:'Press Start 2P',monospace; font-size:11px; color:var(--gold); }
+  #dlgRole{ font-size:14px; color:var(--gold-dim); }
+  #dlgText{ font-size:21px; line-height:1.35; min-height:2.7em; color:var(--paper); }
+  #dlgFooter{ display:flex; justify-content:flex-end; }
+  #dlgContinue{ font-family:'Press Start 2P',monospace; font-size:9px; color:var(--gold); cursor:pointer; padding:4px 8px; animation:blink 1.1s infinite; }
+  @keyframes blink{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  #dlgChoices{ display:flex; flex-direction:column; gap:6px; }
+  .choiceBtn{
+    text-align:left; background:#332216; border:2px solid var(--panel-edge-lit); color:var(--paper);
+    padding:8px 10px; font-family:'VT323',monospace; font-size:19px; border-radius:3px; cursor:pointer;
+  }
+  .choiceBtn:active{ background:#4a3324; }
+  .choiceImpact{ display:block; font-family:'Press Start 2P',monospace; font-size:7px; color:var(--gold-dim); margin-top:3px; }
+
+  /* ---------- Narration (prologue/epilogue) ---------- */
+  #narrationScreen{
+    position:absolute; inset:0; z-index:30; background:radial-gradient(ellipse at center, #1b2440 0%, #0a0d18 75%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px; text-align:center;
+  }
+  #narrationScreen .eyebrow{ font-family:'Press Start 2P',monospace; font-size:10px; color:var(--gold-dim); letter-spacing:2px; margin-bottom:18px; }
+  #narrationScreen .body{ font-size:24px; line-height:1.6; max-width:640px; color:var(--paper); min-height:5.5em; }
+  #narrationScreen .cont{ margin-top:26px; font-family:'Press Start 2P',monospace; font-size:10px; color:var(--gold); cursor:pointer; animation:blink 1.1s infinite; }
+
+  /* ---------- Chapter transition card ---------- */
+  #chapterCard{
+    position:absolute; inset:0; z-index:25; background:#0a0d18; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; padding:20px;
+  }
+  #chapterCard .num{ font-family:'Press Start 2P',monospace; font-size:11px; color:var(--gold-dim); margin-bottom:10px; }
+  #chapterCard .name{ font-family:'Noto Serif TC',serif; font-weight:900; font-size:clamp(24px,7vw,40px); color:var(--gold); text-shadow:0 0 18px rgba(232,196,104,0.4); }
+  #chapterCard .sub{ margin-top:10px; font-size:18px; color:var(--paper); opacity:.8; }
+
+  /* ---------- Title screen ---------- */
+  #titleScreen{
+    position:absolute; inset:0; z-index:50; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:
+      radial-gradient(circle at 30% 20%, rgba(232,196,104,0.10), transparent 45%),
+      linear-gradient(180deg,#0d1226 0%, #1c1420 55%, #2c1c14 100%);
+    text-align:center; padding:24px; gap:8px;
+  }
+  #titleScreen h1{ font-family:'Noto Serif TC',serif; font-weight:900; font-size:clamp(28px,8vw,46px); color:var(--gold); margin:0; text-shadow:0 0 22px rgba(232,196,104,0.45); }
+  #titleScreen .sub{ font-family:'Press Start 2P',monospace; font-size:10px; color:var(--gold-dim); letter-spacing:3px; margin-bottom:18px; }
+  .menuBtn{
+    font-family:'Press Start 2P',monospace; font-size:11px; color:var(--ink); background:var(--gold);
+    border:none; padding:12px 26px; border-radius:3px; cursor:pointer; min-width:220px;
+    box-shadow:0 3px 0 var(--gold-dim);
+  }
+  .menuBtn:active{ transform:translateY(2px); box-shadow:0 1px 0 var(--gold-dim); }
+  .menuBtn.secondary{ background:transparent; color:var(--gold); border:2px solid var(--gold-dim); box-shadow:none; }
+  #titleScreen .howto{ margin-top:22px; font-size:15px; color:var(--paper); opacity:.7; max-width:420px; line-height:1.5; }
+
+  /* ---------- Rotate overlay ---------- */
+  #rotateOverlay{
+    position:fixed; inset:0; z-index:90; background:#0a0d18; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; gap:14px; padding:24px;
+  }
+  #rotateOverlay .icon{ font-size:56px; animation:rotatePulse 1.6s ease-in-out infinite; }
+  @keyframes rotatePulse{ 0%,100%{ transform:rotate(0deg); } 50%{ transform:rotate(-90deg); } }
+  #rotateOverlay p{ font-size:20px; max-width:320px; }
+  #rotateOverlay .dismiss{ margin-top:8px; font-size:15px; color:var(--gold-dim); text-decoration:underline; cursor:pointer; }
+
+  /* ---------- Modals (achievements / dev / ending) ---------- */
+  .modalBackdrop{ position:fixed; inset:0; z-index:60; background:rgba(10,10,14,0.72); backdrop-filter:blur(2px); display:flex; align-items:center; justify-content:center; padding:16px; }
+  .modalPanel{ background:var(--panel); border:2px solid var(--panel-edge-lit); border-radius:6px; padding:18px; max-width:420px; width:100%; max-height:85vh; display:flex; flex-direction:column; }
+  .modalPanel h2{ font-family:'Press Start 2P',monospace; font-size:14px; color:var(--gold); margin:0 0 12px; display:flex; justify-content:space-between; align-items:center; }
+  .modalPanel h2 .x{ cursor:pointer; font-size:20px; color:var(--gold-dim); }
+  .modalPanel .scroll{ overflow-y:auto; padding-right:2px; }
+  .achRow{ display:flex; gap:10px; align-items:center; border:1px solid var(--panel-edge-lit); border-radius:4px; padding:8px 10px; margin-bottom:8px; background:rgba(0,0,0,0.2); }
+  .achRow.locked{ filter:grayscale(1); opacity:.5; }
+  .achRow .ic{ font-size:22px; flex:0 0 auto; }
+  .achRow .name{ font-family:'Press Start 2P',monospace; font-size:10px; color:var(--paper); margin-bottom:3px; }
+  .achRow .desc{ font-size:15px; color:var(--gold-dim); }
+  .sectionLabel{ font-family:'Press Start 2P',monospace; font-size:10px; color:var(--gold-dim); margin:14px 0 8px; border-bottom:1px solid var(--panel-edge-lit); padding-bottom:6px; }
+  .sectionLabel:first-child{ margin-top:0; }
+  .devRow{ display:flex; align-items:center; justify-content:space-between; padding:10px 0; font-size:18px; }
+  .toggleSw{ width:46px; height:26px; background:#3a2a1e; border:2px solid var(--panel-edge-lit); border-radius:999px; position:relative; cursor:pointer; flex:0 0 auto; }
+  .toggleSw.on{ background:var(--military); }
+  .toggleSw .knob{ position:absolute; top:1px; left:1px; width:18px; height:18px; background:var(--paper); border-radius:999px; transition:transform .2s; }
+  .toggleSw.on .knob{ transform:translateX(20px); }
+  .devBtn{ width:100%; text-align:left; background:#3a2a1e; border:2px solid var(--panel-edge-lit); color:var(--paper); padding:10px 12px; border-radius:4px; font-family:'VT323',monospace; font-size:18px; cursor:pointer; margin-top:6px; }
+  .toast{ position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:80; background:#241a14; border:2px solid var(--gold); color:var(--gold); padding:8px 16px; border-radius:5px; font-family:'Press Start 2P',monospace; font-size:9px; }
+
+  #endingEmoji{ font-size:44px; text-align:center; }
+  #endingTitle{ font-family:'Noto Serif TC',serif; font-weight:900; font-size:26px; color:var(--gold); text-align:center; margin:6px 0; }
+  #endingText{ font-size:19px; line-height:1.5; text-align:center; }
+  #endingNote{ font-size:16px; line-height:1.5; text-align:center; color:var(--gold-dim); margin-top:8px; }
+
+  .cheatBanner{
+    position:absolute; top:6px; left:50%; transform:translateX(-50%); z-index:16;
+    font-family:'Press Start 2P',monospace; font-size:8px; color:#ff6b5b; background:rgba(0,0,0,0.55);
+    border:1px solid #ff6b5b; padding:3px 8px; border-radius:3px; animation:blink 1.4s infinite;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="hud">
+    <div class="stat"><span class="icon">🌾</span><div class="track"><div class="fill" id="fillFood" style="background:var(--food);width:50%;"></div></div><span class="num" id="numFood">50</span></div>
+    <div class="stat"><span class="icon">⚔️</span><div class="track"><div class="fill" id="fillMilitary" style="background:var(--military);width:50%;"></div></div><span class="num" id="numMilitary">50</span></div>
+    <div class="stat"><span class="icon">🤝</span><div class="track"><div class="fill" id="fillReputation" style="background:var(--reputation);width:50%;"></div></div><span class="num" id="numReputation">50</span></div>
+    <div class="stat"><span class="icon">💰</span><div class="track"><div class="fill" id="fillWealth" style="background:var(--wealth);width:50%;"></div></div><span class="num" id="numWealth">50</span></div>
+    <div class="chtitle" id="hudChapterTitle">序章</div>
+  </div>
+
+  <div id="stage">
+    <canvas id="gameCanvas"></canvas>
+    <div class="prompt-toast" id="promptToast"></div>
+    <div id="cheatBanner" class="cheatBanner hidden">⚠ 上帝視角作弊中</div>
+
+    <div id="touchControls" class="hidden">
+      <div class="tbtn" id="btnLeft">◀</div>
+      <div class="tbtn" id="btnRight">▶</div>
+      <div class="tbtn" id="btnInteract">互動</div>
+    </div>
+
+    <div id="chapterCard" class="hidden">
+      <div class="num pixel-font" id="chapterCardNum">第一章</div>
+      <div class="name" id="chapterCardName">料羅灣</div>
+      <div class="sub" id="chapterCardSub">出征前夕</div>
+    </div>
+
+    <div id="narrationScreen" class="hidden">
+      <div class="eyebrow pixel-font" id="narrEyebrow">序章</div>
+      <div class="body" id="narrBody">文字</div>
+      <div class="cont pixel-font" id="narrCont">▶ 繼續</div>
+    </div>
+
+    <div id="titleScreen">
+      <h1 id="gameTitleClicker">東寧遺事</h1>
+      <div class="sub">鄭荷台灣記・1661—1662</div>
+      <button class="menuBtn" id="btnNewGame">開始新遊戲</button>
+      <button class="menuBtn secondary hidden" id="btnContinue" style="margin-top:10px;">繼續進度</button>
+      <button class="menuBtn secondary" id="btnTitleAchievements" style="margin-top:10px;">📜 成就圖鑑</button>
+      <div class="howto">方向鍵 ◀▶ 或畫面按鈕行走，靠近路人後按空白鍵／互動鈕開始對話。手機請橫放遊玩。</div>
+    </div>
+
+  </div>
+
+  <div id="dialoguePanel" class="hidden">
+    <div id="dlgHeader">
+      <canvas id="dlgPortrait" width="42" height="42"></canvas>
+      <div>
+        <div id="dlgName" class="pixel-font">名字</div>
+        <div id="dlgRole">身份</div>
+      </div>
+    </div>
+    <div id="dlgText">文字內容</div>
+    <div id="dlgChoices" class="hidden"></div>
+    <div id="dlgFooter">
+      <div id="dlgContinue" class="pixel-font">▶ 繼續</div>
+    </div>
+  </div>
+
+</div>
+
+<div id="rotateOverlay" class="hidden">
+  <div class="icon">📱</div>
+  <p>請將手機橫放，以獲得完整的橫向捲軸體驗</p>
+  <div class="dismiss" id="dismissRotate">仍要直式遊玩 →</div>
+</div>
+
+<div id="achievementModal" class="modalBackdrop hidden">
+  <div class="modalPanel">
+    <h2>📜 成就圖鑑 <span class="x" id="closeAch">&times;</span></h2>
+    <div class="scroll">
+      <div class="sectionLabel">結局成就</div>
+      <div id="endingAchList"></div>
+      <div class="sectionLabel">行為成就</div>
+      <div id="behaviorAchList"></div>
+    </div>
+  </div>
+</div>
+
+<div id="devMenu" class="modalBackdrop hidden">
+  <div class="modalPanel">
+    <h2>🛠️ 開發者選單 <span class="x" id="closeDevMenu">&times;</span></h2>
+    <div class="devRow"><span>上帝視角</span><div class="toggleSw" id="godModeToggle"><div class="knob"></div></div></div>
+    <button class="devBtn" id="maxStatsBtn">📈 資源全滿（回到 80）</button>
+    <button class="devBtn" id="unlockAllBtn">🔓 一鍵解鎖全圖鑑</button>
+    <button class="devBtn" id="skipChapterBtn">⏭️ 跳至下一章（測試用）</button>
+  </div>
+</div>
+
+<div id="endingModal" class="modalBackdrop hidden">
+  <div class="modalPanel">
+    <div id="endingEmoji">🏯</div>
+    <div id="endingTitle">結局標題</div>
+    <div id="endingText">結局說明</div>
+    <div id="endingNote">個人化備註</div>
+    <button class="menuBtn" id="endingRestartBtn" style="margin-top:16px; width:100%;">回到標題畫面</button>
+  </div>
+</div>
+
+<div id="achToast" class="toast hidden">🏆 成就解鎖</div>
+
+<script>
+(function(){
+'use strict';
+
+/* =====================================================================
+   CONSTANTS
+===================================================================== */
+const LW = 480, LH = 270;         // logical canvas resolution
+const GROUND_Y = 210;             // baseline y for character feet
+const PX = 4;                     // logical pixels per sprite-grid cell
+const SPEED = 90;                 // world units / second
+const INTERACT_RANGE = 46;
+const STORAGE_KEY = 'taiwan1661_rpg_v1';
+
+/* =====================================================================
+   SPRITE RENDERING (procedural pixel-block humanoids)
+===================================================================== */
+function drawHumanoid(ctx, wx, groundY, opts, facing, walking, t){
+  // opts: {skin,hair,robe,robe2,accent,headwear,headwearColor}
+  const bob = walking ? Math.sin(t*10)*2 : 0;
+  const x = Math.round(wx);
+  const gy = Math.round(groundY + bob);
+  const flip = facing < 0;
+  const g = (col,row,w,h,color)=>{
+    const gx = flip ? -(col+w) : col;
+    ctx.fillStyle = color;
+    ctx.fillRect(x + gx*PX, gy - (16-row)*PX, w*PX, h*PX);
+  };
+  // legs (row 11-15)
+  const legPhase = walking ? Math.sin(t*10) : 0;
+  const legOffsetA = legPhase > 0 ? 1 : 0;
+  const legOffsetB = legPhase > 0 ? 0 : 1;
+  g(1,11,2,5+legOffsetA, opts.robe2);
+  g(4,11,2,5+legOffsetB, opts.robe2);
+  // feet
+  g(1,16, 2, 0, opts.robe2);
+  // torso
+  g(0,5,7,7, opts.robe);
+  // sash accent
+  g(0,9,7,1, opts.accent);
+  // arms
+  const armSwing = walking ? Math.sin(t*10)*1.5 : 0;
+  g(-1,6+Math.round(armSwing),1,4, opts.robe);
+  g(7,6-Math.round(armSwing),1,4, opts.robe);
+  // hands
+  g(-1,10+Math.round(armSwing),1,1, opts.skin);
+  g(7,10-Math.round(armSwing),1,1, opts.skin);
+  // neck
+  g(2,4,2,1, opts.skin);
+  // head
+  g(1,0,5,4, opts.skin);
+  // headwear
+  switch(opts.headwear){
+    case 'topknot':
+      g(2,-2,2,2, opts.hair);
+      g(1,0,5,1, opts.hair);
+      break;
+    case 'cap':
+      g(0,-1,7,2, opts.headwearColor || opts.hair);
+      break;
+    case 'hat':
+      g(-1,-1,9,1, opts.headwearColor || '#2a2a2a');
+      g(1,-3,5,2, opts.headwearColor || '#2a2a2a');
+      break;
+    case 'plume':
+      g(-1,-1,9,1, opts.headwearColor || '#241a14');
+      g(1,-4,5,3, opts.headwearColor || '#241a14');
+      g(5,-6,1,3, opts.accent);
+      break;
+    case 'feather':
+      g(1,-1,5,1, opts.hair);
+      g(5,-5,1,4, opts.accent);
+      g(6,-4,1,3, '#e8c468');
+      break;
+    default:
+      g(1,-1,5,1, opts.hair);
+  }
+}
+
+function drawPortrait(canvas, opts){
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0,0,42,42);
+  ctx.fillStyle = '#101a33';
+  ctx.fillRect(0,0,42,42);
+  ctx.save();
+  const scale = 0.73;
+  ctx.translate(11,57.5);
+  ctx.scale(scale,scale);
+  drawHumanoid(ctx, 0, 0, opts, 1, false, 0);
+  ctx.restore();
+}
+
+/* =====================================================================
+   BACKGROUND THEMES
+===================================================================== */
+const SKY = {
+  harbor:['#0d1530','#3a5570'], sea:['#0a1128','#1c4a5e'], provintia:['#241428','#7a4a3a'],
+  town:['#101a33','#e0955e'], siege:['#150c18','#5c2a2a'], camp:['#080a14','#241830'],
+  gate:['#1a0e10','#c9673f'], dawn:['#141428','#e8a15c']
+};
+function skyGrad(ctx, theme){
+  const c = SKY[theme] || SKY.town;
+  const grad = ctx.createLinearGradient(0,0,0,GROUND_Y+10);
+  grad.addColorStop(0, c[0]);
+  grad.addColorStop(1, c[1]);
+  return grad;
+}
+function drawBackground(ctx, theme, camX, levelW){
+  ctx.fillStyle = skyGrad(ctx, theme);
+  ctx.fillRect(0,0,LW,GROUND_Y+10);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  for(let i=0;i<5;i++){
+    const sx = ((i*137 - camX*0.05) % (LW+40) + (LW+40)) % (LW+40) - 20;
+    ctx.globalAlpha = 0.5 - i*0.06;
+    ctx.beginPath(); ctx.arc(sx, 30+ (i%3)*14, 1.4, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  const far = -camX*0.3, mid = -camX*0.6;
+
+  function repeatDraw(spacing, offset, drawFn){
+    const start = Math.floor((camX-200)/spacing)*spacing;
+    for(let wx=start; wx<camX+LW+200; wx+=spacing){ drawFn(wx+offset); }
+  }
+
+  ctx.save();
+  if(theme==='harbor' || theme==='sea'){
+    ctx.fillStyle = 'rgba(20,40,55,0.55)';
+    repeatDraw(220, far, (wx)=>{
+      const sx = wx - camX*0.3 - (far - -camX*0.3) + camX*0.3; // simplified below
+    });
+    // ship silhouettes (parallax 0.3)
+    repeatDraw(260, 40, (wx)=>{
+      const sx = wx*0.3 + far*0; const dx = wx - camX*0.3;
+    });
+  }
+  ctx.restore();
+
+  // --- simplified, robust parallax draw (world-space objects at factor f) ---
+  function drawAtFactor(f, drawFn, spacing, seed){
+    const camF = camX*f;
+    const start = Math.floor((camF-100)/spacing)*spacing;
+    for(let wx=start; wx<camF+LW+100; wx+=spacing){
+      drawFn(wx - camF, wx+seed);
+    }
+  }
+
+  if(theme==='harbor'){
+    ctx.fillStyle = '#16263a';
+    drawAtFactor(0.3, (sx,seed)=>{
+      ctx.fillRect(sx, 150, 46, 30);
+      ctx.beginPath(); ctx.moveTo(sx+23,150); ctx.lineTo(sx+23,110); ctx.lineTo(sx+27,150); ctx.fill();
+    }, 260, 0);
+  }
+  if(theme==='sea'){
+    ctx.fillStyle = '#0e2436';
+    drawAtFactor(0.35, (sx)=>{ ctx.fillRect(sx,160,54,26); }, 300, 0);
+    ctx.fillStyle = 'rgba(30,70,90,0.6)';
+    drawAtFactor(0.7, (sx)=>{ ctx.fillRect(sx,GROUND_Y-6,120,6); }, 140, 0);
+  }
+  if(theme==='provintia' || theme==='siege' || theme==='gate'){
+    ctx.fillStyle = '#3a2c28';
+    drawAtFactor(0.3, (sx)=>{
+      ctx.fillRect(sx,90,90,120);
+      ctx.fillStyle='#241a18'; ctx.fillRect(sx+10,105,14,14); ctx.fillRect(sx+40,105,14,14); ctx.fillRect(sx+66,105,14,14);
+      ctx.fillStyle='#3a2c28';
+    }, 260, 0);
+  }
+  if(theme==='town'){
+    ctx.fillStyle = '#2a2018';
+    drawAtFactor(0.35, (sx)=>{
+      ctx.fillRect(sx,120,70,90);
+      ctx.fillStyle='#4a3324'; ctx.beginPath(); ctx.moveTo(sx-6,120); ctx.lineTo(sx+35,96); ctx.lineTo(sx+76,120); ctx.fill();
+      ctx.fillStyle='#2a2018';
+    }, 180, 0);
+  }
+  if(theme==='camp'){
+    ctx.fillStyle = '#241a14';
+    drawAtFactor(0.4, (sx)=>{
+      ctx.beginPath(); ctx.moveTo(sx,GROUND_Y); ctx.lineTo(sx+22,168); ctx.lineTo(sx+44,GROUND_Y); ctx.fill();
+    }, 130, 0);
+  }
+
+  // mid ground band
+  ctx.fillStyle = theme==='sea' || theme==='harbor' ? '#123044' : '#3a2c1e';
+  ctx.fillRect(0, GROUND_Y, LW, LH-GROUND_Y);
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  drawAtFactor(1.0, (sx)=>{ ctx.fillRect(sx,GROUND_Y,2,LH-GROUND_Y); }, 24, 0);
+}
+
+function drawProp(ctx, sx, type){
+  switch(type){
+    case 'crate':
+      ctx.fillStyle='#6b4a30'; ctx.fillRect(sx,GROUND_Y-16,18,16);
+      ctx.strokeStyle='#3a2818'; ctx.lineWidth=1; ctx.strokeRect(sx+1,GROUND_Y-15,16,14);
+      break;
+    case 'barrel':
+      ctx.fillStyle='#5c3a22'; ctx.fillRect(sx,GROUND_Y-20,14,20);
+      ctx.fillStyle='#3a2414'; ctx.fillRect(sx,GROUND_Y-16,14,2); ctx.fillRect(sx,GROUND_Y-8,14,2);
+      break;
+    case 'cannon':
+      ctx.fillStyle='#2a2a2a'; ctx.fillRect(sx,GROUND_Y-14,26,10);
+      ctx.fillRect(sx+18,GROUND_Y-20,10,10);
+      ctx.fillStyle='#4a3324'; ctx.fillRect(sx+2,GROUND_Y-4,22,6);
+      break;
+    case 'palm':
+      ctx.fillStyle='#5c4020'; ctx.fillRect(sx,GROUND_Y-46,6,46);
+      ctx.fillStyle='#3f6b2e';
+      ctx.beginPath(); ctx.ellipse(sx+3,GROUND_Y-50,20,8,0.4,0,7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(sx+3,GROUND_Y-50,20,8,-0.4,0,7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(sx+3,GROUND_Y-50,22,7,0,0,7); ctx.fill();
+      break;
+    case 'lantern':
+      ctx.fillStyle='#241a14'; ctx.fillRect(sx+6,GROUND_Y-60,2,30);
+      ctx.fillStyle='#e8c468'; ctx.fillRect(sx,GROUND_Y-32,14,14);
+      ctx.fillStyle='#c23b22'; ctx.fillRect(sx+2,GROUND_Y-30,10,10);
+      break;
+    case 'net':
+      ctx.strokeStyle='rgba(200,190,170,0.4)'; ctx.lineWidth=1;
+      for(let i=0;i<5;i++){ ctx.beginPath(); ctx.moveTo(sx+i*6,GROUND_Y-2); ctx.lineTo(sx+i*6+14,GROUND_Y-22); ctx.stroke(); }
+      break;
+  }
+}
+
+/* =====================================================================
+   CHARACTER PALETTES
+===================================================================== */
+const P = {
+  koxinga:   {skin:'#e8c9a0',hair:'#171717',robe:'#4a1f1f',robe2:'#2a1414',accent:'#e8c468',headwear:'topknot'},
+  ganhui:    {skin:'#d8b998',hair:'#171717',robe:'#3a2a1a',robe2:'#241a10',accent:'#a9863f',headwear:'topknot'},
+  hebin:     {skin:'#e0c39c',hair:'#171717',robe:'#2b4a3f',robe2:'#1a2e28',accent:'#d4a72c',headwear:'cap',headwearColor:'#1a2e28'},
+  sentry:    {skin:'#f0d5b8',hair:'#5a4020',robe:'#3a4a5c',robe2:'#24303c',accent:'#c9a445',headwear:'hat',headwearColor:'#22303c'},
+  valentijn: {skin:'#f0d5b8',hair:'#8a6a3a',robe:'#465468',robe2:'#2c3644',accent:'#c9a445',headwear:'hat',headwearColor:'#2c3644'},
+  elder:     {skin:'#c98a55',hair:'#3a2a1a',robe:'#7a5c3a',robe2:'#5c4228',accent:'#a83232',headwear:'feather'},
+  smuggler:  {skin:'#e0c39c',hair:'#241a14',robe:'#5c3a5c',robe2:'#3a243a',accent:'#d4a72c',headwear:'cap',headwearColor:'#3a243a'},
+  farmer:    {skin:'#d8b998',hair:'#241a14',robe:'#8a7048',robe2:'#5c4a30',accent:'#6b8a4a',headwear:'none'},
+  gunner:    {skin:'#d8b998',hair:'#171717',robe:'#4a1f1f',robe2:'#2a1414',accent:'#e8c468',headwear:'topknot'},
+  general:   {skin:'#d8b998',hair:'#171717',robe:'#4a1f1f',robe2:'#2a1414',accent:'#e8c468',headwear:'topknot'},
+  deserter:  {skin:'#e8d0b0',hair:'#6a5a30',robe:'#4a5058',robe2:'#2c3034',accent:'#5a5f63',headwear:'none'},
+  coyett:    {skin:'#f0d5b8',hair:'#9a8050',robe:'#3a4560',robe2:'#242c3c',accent:'#e8c468',headwear:'plume',headwearColor:'#241a20'}
+};
+
+/* =====================================================================
+   ENDINGS
+===================================================================== */
+const ENDINGS = {
+  golden:{ id:'end_golden', emoji:'🏯', title:'東寧盛世', text:'糧足兵強，民心歸附，府庫充盈。承天府燈火通明，東寧政權在台灣穩穩扎根，寫下漢人治台的第一頁盛世。' },
+  famine:{ id:'end_famine', emoji:'🌾', title:'糧荒陰影', text:'雖然趕走了荷蘭人，但連年征戰耗盡糧倉。東寧初立便面臨缺糧之苦，將士與百姓都得勒緊褲帶度過頭幾年。' },
+  weak:{ id:'end_weak', emoji:'⚔️', title:'兵疲力竭', text:'圍城與海戰讓鄭家軍元氣大傷。趕走荷蘭人的代價極為慘重，東寧初期兵力空虛，只能休養生息以待來日。' },
+  unrest:{ id:'end_unrest', emoji:'🔥', title:'民怨未平', text:'高壓手段雖然贏了戰爭，卻在漢人與原住民之間埋下裂痕。東寧政權建立之初，內部的怨懟仍在悶燒。' },
+  poor:{ id:'end_poor', emoji:'💸', title:'府庫空虛', text:'龐大的軍費幾乎掏空了鄭氏的家底。荷蘭人退走了，但東寧政權要靠貿易慢慢填補這個大窟窿。' },
+  stable:{ id:'end_stable', emoji:'⛵', title:'平穩過渡', text:'沒有輝煌的盛世，也沒有崩潰的危機。鄭成功以務實的方式收復台灣，為東寧政權留下了一個可以慢慢經營的起點。' },
+  turmoil:{ id:'end_turmoil', emoji:'🌀', title:'風雨東寧', text:'戰爭勝利了，但多項根基同時出現裂縫。東寧政權表面上收復了台灣，實際上卻是在滿目瘡痍中蹣跚起步。' }
+};
+
+const ACHIEVEMENTS = {
+  endings:[
+    {id:'end_golden', name:'東寧盛世', desc:'以富足穩健之姿結束遊戲', icon:'🏯'},
+    {id:'end_famine', name:'糧荒陰影', desc:'糧食過低結束遊戲', icon:'🌾'},
+    {id:'end_weak', name:'兵疲力竭', desc:'兵力過低結束遊戲', icon:'⚔️'},
+    {id:'end_unrest', name:'民怨未平', desc:'聲望過低結束遊戲', icon:'🔥'},
+    {id:'end_poor', name:'府庫空虛', desc:'國庫過低結束遊戲', icon:'💸'},
+    {id:'end_stable', name:'平穩過渡', desc:'以平穩姿態結束遊戲', icon:'⛵'},
+    {id:'end_turmoil', name:'風雨東寧', desc:'多項數值同時陷入危機', icon:'🌀'}
+  ],
+  behaviors:[
+    {id:'beh_talker', name:'談心大師', desc:'與全劇每一位角色都對話過', icon:'💬'},
+    {id:'beh_stealth', name:'奇襲戰術家', desc:'選擇趁潮強渡鹿耳門', icon:'🌊'},
+    {id:'beh_diplomat', name:'懷柔者', desc:'選擇以布匹安撫平埔族', icon:'🕊️'},
+    {id:'beh_tuntian', name:'屯田先驅', desc:'選擇實施屯田制', icon:'🌱'},
+    {id:'beh_finish', name:'開府建功', desc:'完整通關《東寧遺事》', icon:'🎖️'}
+  ]
+};
+
+/* =====================================================================
+   DIALOGUE DATA
+===================================================================== */
+const DIALOGUES = {
+
+  ch1_ganhui:{ start:'a1', nodes:{
+    a1:{speaker:'甘輝',role:'左先鋒',sprite:'ganhui', text:'國姓爺，將士們已整裝完畢，糧草也備妥三月之用。', next:'a2'},
+    a2:{speaker:'甘輝',role:'左先鋒',sprite:'ganhui', text:'只是……金廈根據地日漸窘迫，清軍步步進逼，我們真能在台灣站穩腳跟嗎？', next:'a3'},
+    a3:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'福爾摩沙沃野千里，退可屯田自給，進可再圖恢復中原。此地，將是我們最後的根據地。', next:'a4'},
+    a4:{speaker:'甘輝',role:'左先鋒',sprite:'ganhui', text:'末將明白了。三軍已備妥，只待何斌帶來的海圖與潮汐時辰。', next:null}
+  }},
+
+  ch1_hebin:{ start:'a1', nodes:{
+    a1:{speaker:'何斌',role:'通事',sprite:'hebin', text:'國姓爺，這是我在大員多年繪製的海圖——熱蘭遮城砲台雖固，鹿耳門水道卻是荷蘭人疏於防範之處。', next:'a2'},
+    a2:{speaker:'何斌',role:'通事',sprite:'hebin', text:'每月初一、十五大潮，水位可漲三尺有餘，尋常時候擱淺的暗礁屆時都能行船。', next:'a3'},
+    a3:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'好，就依大潮之期出兵。何斌，此行你便是我軍的眼睛。', next:null}
+  }},
+
+  ch2_hebin:{ start:'a1', nodes:{
+    a1:{speaker:'何斌',role:'通事',sprite:'hebin', text:'國姓爺，今日正是大潮，鹿耳門水道水位大漲，是天賜良機！只是……戰法仍需您定奪。', next:'a2'},
+    a2:{speaker:'何斌',role:'通事',sprite:'hebin', text:'熱蘭遮城的砲台正對外海，若走正面强攻，恐怕折損慘重；若趁大潮偷渡鹿耳門，可繞到台江內海突襲，但水道狹窄，稍有不慎就會全軍擱淺。', choices:[
+      {label:'正面強攻熱蘭遮城砲台', next:'assault1', effect:{military:-15,food:-5}, flag:'tactic_assault'},
+      {label:'趁大潮強渡鹿耳門偷襲', next:'stealth1', effect:{military:10,reputation:8}, flag:'tactic_stealth'}
+    ]},
+    assault1:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'兵貴神速，也貴堂堂正正。傳令全軍，正面壓上，讓荷蘭人見識我大軍的氣勢！', next:'assault2'},
+    assault2:{speaker:'何斌',role:'通事',sprite:'hebin', text:'（砲火轟鳴，硝煙瀰漫……）將士們前仆後繼，雖然折損不小，但艦隊終究頂著砲火逼近了海岸。', next:'merge'},
+    stealth1:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'既然荷蘭人疏於防範水道，便趁夜色與大潮，悄悄繞道而入。傳令，收帆靜行，不得喧嘩！', next:'stealth2'},
+    stealth2:{speaker:'何斌',role:'通事',sprite:'hebin', text:'（船隊悄然滑過暗礁密布的水道……）成了！我軍已神不知鬼不覺地進入台江內海，荷蘭人竟渾然不覺！', next:'merge'},
+    merge:{speaker:'何斌',role:'通事',sprite:'hebin', text:'國姓爺，前方就是普羅民遮城，守軍應該還不知道我們已經到了。', next:null}
+  }},
+
+  ch2_sentry:{ start:'a1', nodes:{
+    a1:{speaker:'荷蘭哨兵',role:'東印度公司士兵',sprite:'sentry', text:'什……什麼？中國帆船怎麼會出現在這裡！這不可能，這裡的水道連我們的船都不敢輕易通行！', next:'a2'},
+    a2:{speaker:'荷蘭哨兵',role:'東印度公司士兵',sprite:'sentry', text:'快，快去通報揆一長官！鄭家的艦隊已經打到台江內海了！', next:null}
+  }},
+
+  ch3_valentijn:{ start:'a1', nodes:{
+    a1:{speaker:'描難實叮',role:'普羅民遮城代理長官',sprite:'valentijn', text:'鄭將軍……普羅民遮城守軍不足百人，糧食與淡水也所剩無幾。我們……我們沒有能力抵抗。', next:'a2'},
+    a2:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'開城投降者，我保證善待城中所有軍民，糧食物資也不會強行掠奪。', next:'a3'},
+    a3:{speaker:'描難實叮',role:'普羅民遮城代理長官',sprite:'valentijn', text:'（長官放下佩劍）……1661 年 5 月 4 日，普羅民遮城，開城。', choices:[
+      {label:'寬待降兵，妥善安置', next:'mercy1', effect:{reputation:10,wealth:-8}, flag:null},
+      {label:'徵收城中物資充作軍需', next:'harsh1', effect:{wealth:15,reputation:-8}, flag:null}
+    ]},
+    mercy1:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'放下武器的人，便不再是敵人。安排他們妥善居住，糧食按人頭分配。', next:'m2'},
+    m2:{speaker:'描難實叮',role:'普羅民遮城代理長官',sprite:'valentijn', text:'……多謝將軍寬待。這份仁義，我會如實稟報熱蘭遮城的揆一長官。', next:null},
+    harsh1:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'戰事未歇，糧秣為先。城中庫存，一律登記造冊，充作軍需。', next:'h2'},
+    h2:{speaker:'描難實叮',role:'普羅民遮城代理長官',sprite:'valentijn', text:'……是。（他低下頭，眼神裡多了幾分怨懟）', next:null}
+  }},
+
+  ch4_elder:{ start:'a1', nodes:{
+    a1:{speaker:'平埔族長老',role:'新港社頭人',sprite:'elder', text:'鄭將軍，你們漢人的軍隊一到，就在我們祖先留下的獵場上紮營、開墾。年輕的獵人們都很憤怒。', next:'a2'},
+    a2:{speaker:'平埔族長老',role:'新港社頭人',sprite:'elder', text:'荷蘭人雖然也徵稅，但至少沒有奪走我們的土地。你們，打算怎麼對待我們？', choices:[
+      {label:'致贈布匹鹽巴，承諾劃界共存', next:'soft1', effect:{reputation:22,wealth:-15}, flag:'diplomacy_soft'},
+      {label:'派兵駐守，強勢劃定開墾範圍', next:'harsh2', effect:{military:5,reputation:-30}, flag:'diplomacy_harsh'}
+    ]},
+    soft1:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'長老放心，漢人開墾的土地，會與新港社的獵場清楚劃界，往後互不侵犯，這批布匹鹽巴，就當作是見面禮。', next:'s2'},
+    s2:{speaker:'平埔族長老',role:'新港社頭人',sprite:'elder', text:'……好，既然你願意立界，我們新港社願意與你們和平往來，甚至可以幫忙引路、通譯。', next:null},
+    harsh2:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'開墾之地，軍隊自會劃定範圍，長老只需約束族人不要輕舉妄動即可。', next:'h3'},
+    h3:{speaker:'平埔族長老',role:'新港社頭人',sprite:'elder', text:'……（長老沉默地轉身離去，年輕獵人們的臉上寫滿了不甘）', next:null}
+  }},
+
+  ch4_smuggler:{ start:'a1', nodes:{
+    a1:{speaker:'走私商人',role:'鹿皮蔗糖行商',sprite:'smuggler', text:'國姓爺，這批鹿皮跟蔗糖，本來是要走私賣去日本的，現在改朝換代，不知道還能不能繼續做買賣？', next:'a2'},
+    a2:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'照舊。東寧初立，正需要銀兩維持軍需，你的商隊只要照章納稅，便可自由往來。', effect:{wealth:12}, next:'a3'},
+    a3:{speaker:'走私商人',role:'鹿皮蔗糖行商',sprite:'smuggler', text:'哈哈，那可太好了！有國姓爺這句話，我這趟就多備幾船貨物出海！', next:null}
+  }},
+
+  ch4_farmer:{ start:'a1', nodes:{
+    a1:{speaker:'漢人墾農',role:'佃農',sprite:'farmer', text:'將軍，這片地荷蘭人本來讓我們種甘蔗抽稅，現在換你們來，我們這幾萬張嘴，吃飯還是個大問題啊。', next:'a2'},
+    a2:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'我知道。糧食短缺是眼下最迫切的事，我正在思量對策，你且安心耕作。', next:null}
+  }},
+
+  ch5_gunner:{ start:'a1', nodes:{
+    a1:{speaker:'砲隊隊長',role:'鄭家軍砲兵',sprite:'gunner', text:'國姓爺，熱蘭遮城的城牆比普羅民遮城厚實太多，我們的紅夷砲轟了半個月，城牆連個缺口都沒有。', next:'a2'},
+    a2:{speaker:'砲隊隊長',role:'鄭家軍砲兵',sprite:'gunner', text:'更麻煩的是，斥候剛回報——巴達維亞派了一支艦隊，由「烏特勒支號」領頭，正朝台江內海駛來增援！', next:null}
+  }},
+
+  ch5_battle:{ start:'a1', nodes:{
+    a1:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'荷蘭援軍已至，若讓他們與城內守軍會合，圍城便前功盡棄。傳令各將——如何應戰？', choices:[
+      {label:'集中戰船火力正面決戰', next:'focus1', effect:{military:-20,food:-5}, flag:null},
+      {label:'分散小船伏擊補給線', next:'ambush1', effect:{military:5,food:-10}, flag:null}
+    ]},
+    focus1:{speaker:'砲隊隊長',role:'鄭家軍砲兵',sprite:'gunner', text:'（戰船齊出，砲火交織……）烏特勒支號中彈起火，荷蘭艦隊倉皇撤退，但我軍水師也損失了好幾艘戰船。', next:'merge'},
+    ambush1:{speaker:'砲隊隊長',role:'鄭家軍砲兵',sprite:'gunner', text:'（小船趁夜色分頭出擊……）我們切斷了荷蘭艦隊的補給與通訊，他們不敢貿然靠岸，只能在外海徘徊。', next:'merge'},
+    merge:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'荷蘭援軍已退，熱蘭遮城成了一座孤城。傳令三軍，就地紮營，長期圍困！', next:null}
+  }},
+
+  ch6_general:{ start:'a1', nodes:{
+    a1:{speaker:'明鄭將領',role:'圍城督軍',sprite:'general', text:'主公，圍城已近半年，軍糧快要見底了，好幾萬大軍再這樣下去恐怕會不戰自潰。', choices:[
+      {label:'實施「屯田制」，就地開墾', next:'tuntian1', effect:{military:-10,food:35}, flag:'policy_tuntian'},
+      {label:'向附近部落與漢人強行徵收', next:'levy1', effect:{military:8,food:28,reputation:-30}, flag:'policy_levy'}
+    ]},
+    tuntian1:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'傳令，各營輪班屯田，寓兵於農。眼下雖然辛苦，卻是長久之計。', next:'t2'},
+    t2:{speaker:'明鄭將領',role:'圍城督軍',sprite:'general', text:'……是。將士們一邊種田一邊操練，雖然頭幾個月收成不多，但軍心倒是穩了下來。', next:'merge'},
+    levy1:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'非常時期，非常手段。傳令各社，按人口徵糧，軍需優先。', next:'l2'},
+    l2:{speaker:'明鄭將領',role:'圍城督軍',sprite:'general', text:'……糧食是徵到了，但周圍部落與漢人村落都對我們心生怨懟，這個代價恐怕不小。', next:'merge'},
+    merge:{speaker:'明鄭將領',role:'圍城督軍',sprite:'general', text:'不管怎麼說，糧食問題暫時解決了。倒是聽說城裡的荷蘭守軍，士氣越來越差了。', next:null}
+  }},
+
+  ch6_deserter:{ start:'a1', nodes:{
+    a1:{speaker:'荷蘭逃兵',role:'投誠士兵',sprite:'deserter', text:'（用生澀的閩南話）長官……不，將軍，我叫做拉迪斯，我是從熱蘭遮城逃出來投誠的。', next:'a2'},
+    a2:{speaker:'荷蘭逃兵',role:'投誠士兵',sprite:'deserter', text:'城裡的糧食也快沒了，士兵天天吵著要投降，揆一長官還在死撐，說巴達維亞一定會再派援軍來……但沒有人相信了。', next:null}
+  }},
+
+  ch7_coyett:{ start:'a1', nodes:{
+    a1:{speaker:'揆一',role:'荷蘭東印度公司台灣長官',sprite:'coyett', text:'鄭將軍……九個月了。巴達維亞沒有再派來援軍，城裡的存糧也已經見底。', next:'a2'},
+    a2:{speaker:'揆一',role:'荷蘭東印度公司台灣長官',sprite:'coyett', text:'我，弗雷德里克・揆一，代表荷蘭東印度公司，願意開城投降，只求你放我們一條生路，讓我們的人平安返回巴達維亞。', next:'a3'},
+    a3:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'一路走來，我見識過你們的砲台，也見識過你們最後的頑抗。這場戰爭，該結束了。', next:'a4'},
+    a4:{speaker:'揆一',role:'荷蘭東印度公司台灣長官',sprite:'coyett', text:'……那麼，城中僅存的財物與武器，我們是否能夠一併帶走？', choices:[
+      {label:'准許攜帶私人財物與武器撤離', next:'lenient1', effect:{wealth:-10,reputation:12}, flag:null},
+      {label:'扣留武器彈藥，僅放行人員', next:'strict1', effect:{wealth:12,reputation:-6}, flag:null}
+    ]},
+    lenient1:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'准了。你們可以帶著私人財物與部分武器，體面地離開這座城。', next:'lm2'},
+    lm2:{speaker:'揆一',role:'荷蘭東印度公司台灣長官',sprite:'coyett', text:'……多謝將軍成全。1662 年 2 月 1 日，我在此簽署條約，將熱蘭遮城與全部產業，移交給你。', next:'merge'},
+    strict1:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'人可以走，但武器彈藥必須留下——這是給後來者的教訓。', next:'sm2'},
+    sm2:{speaker:'揆一',role:'荷蘭東印度公司台灣長官',sprite:'coyett', text:'……如你所願。1662 年 2 月 1 日，我在此簽署條約，將熱蘭遮城與全部產業，移交給你。', next:'merge'},
+    merge:{speaker:'國姓爺',role:'延平王',sprite:'koxinga', text:'荷蘭東印度公司在台灣三十八年的統治，到今天結束了。傳令三軍，入城！', next:null}
+  }}
+};
+
+/* =====================================================================
+   CHAPTERS
+===================================================================== */
+const CHAPTERS = [
+  { id:'ch1', num:'第一章', title:'料羅灣', sub:'出征前夕', theme:'harbor', width:760,
+    props:[{type:'barrel',x:120},{type:'crate',x:400},{type:'net',x:560}],
+    npcs:[
+      {id:'ganhui', x:220, name:'甘輝', role:'左先鋒', sprite:'ganhui', dialogue:'ch1_ganhui'},
+      {id:'hebin', x:560, name:'何斌', role:'通事', sprite:'hebin', dialogue:'ch1_hebin'}
+    ],
+    exitLine:'啟航，直取台灣！' },
+
+  { id:'ch2', num:'第二章', title:'鹿耳門海戰', sub:'大潮奇襲', theme:'sea', width:820,
+    props:[{type:'net',x:200}],
+    npcs:[
+      {id:'hebin2', x:300, name:'何斌', role:'通事', sprite:'hebin', dialogue:'ch2_hebin'},
+      {id:'sentry', x:640, name:'荷蘭哨兵', role:'東印度公司士兵', sprite:'sentry', dialogue:'ch2_sentry'}
+    ],
+    exitLine:'台江內海，就在眼前！' },
+
+  { id:'ch3', num:'第三章', title:'普羅民遮城', sub:'不戰而降', theme:'provintia', width:700,
+    props:[{type:'crate',x:150},{type:'cannon',x:520}],
+    npcs:[
+      {id:'valentijn', x:400, name:'描難實叮', role:'代理長官', sprite:'valentijn', dialogue:'ch3_valentijn'}
+    ],
+    exitLine:'轉往熱蘭遮城，圍城之戰即將展開。' },
+
+  { id:'ch4', num:'第四章', title:'大員街景', sub:'漢原雜處', theme:'town', width:900,
+    props:[{type:'lantern',x:180},{type:'crate',x:420},{type:'barrel',x:700}],
+    npcs:[
+      {id:'elder', x:230, name:'平埔族長老', role:'新港社頭人', sprite:'elder', dialogue:'ch4_elder'},
+      {id:'smuggler', x:500, name:'走私商人', role:'鹿皮蔗糖行商', sprite:'smuggler', dialogue:'ch4_smuggler'},
+      {id:'farmer', x:760, name:'漢人墾農', role:'佃農', sprite:'farmer', dialogue:'ch4_farmer'}
+    ],
+    exitLine:'移師熱蘭遮城下，圍城正式開始。' },
+
+  { id:'ch5', num:'第五章', title:'熱蘭遮城圍城', sub:'孤城海戰', theme:'siege', width:780,
+    props:[{type:'cannon',x:200},{type:'cannon',x:340}],
+    npcs:[
+      {id:'gunner', x:280, name:'砲隊隊長', role:'鄭家軍砲兵', sprite:'gunner', dialogue:'ch5_gunner'},
+      {id:'battle', x:620, name:'國姓爺', role:'延平王', sprite:'koxinga', dialogue:'ch5_battle'}
+    ],
+    exitLine:'荷蘭援軍已退，熱蘭遮城成了孤城。' },
+
+  { id:'ch6', num:'第六章', title:'長期對峙', sub:'圍城歲月', theme:'camp', width:800,
+    props:[{type:'lantern',x:160},{type:'crate',x:440}],
+    npcs:[
+      {id:'general', x:260, name:'明鄭將領', role:'圍城督軍', sprite:'general', dialogue:'ch6_general'},
+      {id:'deserter', x:600, name:'荷蘭逃兵', role:'投誠士兵', sprite:'deserter', dialogue:'ch6_deserter'}
+    ],
+    exitLine:'荷軍士氣潰散，城陷只是時間問題。' },
+
+  { id:'ch7', num:'第七章', title:'熱蘭遮城陷落', sub:'鄭荷條約', theme:'gate', width:700,
+    props:[{type:'cannon',x:180}],
+    npcs:[
+      {id:'coyett', x:420, name:'揆一', role:'台灣長官', sprite:'coyett', dialogue:'ch7_coyett'}
+    ],
+    exitLine:'熱蘭遮城易幟，荷蘭時代結束。' }
+];
+
+/* =====================================================================
+   NARRATION TEXT
+===================================================================== */
+const PROLOGUE = [
+  '1624 年，荷蘭東印度公司在台灣南部建起熱蘭遮城，將這座島嶼納入東亞貿易網絡的一環，統治已近四十年。',
+  '同一時期的中國大陸，滿清鐵騎南下，明朝宗室節節敗退。鄭成功據守金門、廈門，奉明正朔，苦苦支撐著反清復明的最後旗幟。',
+  '然而金廈彈丸之地，糧餉日蹙，清軍步步進逼。通事何斌，一位熟悉台灣水文的商人，向鄭成功獻上了一張海圖與一個大膽的提議——渡海攻台，另闢根據地。',
+  '1661 年四月，料羅灣。兩萬五千名將士，四百餘艘戰船，即將揚帆，駛向那座荷蘭人稱為「福爾摩沙」的島嶼。'
+];
+
+const EPILOGUE_PRE = [
+  '1662 年 2 月 1 日，熱蘭遮城正式易主。荷蘭東印度公司在台灣三十八年的統治，就此畫下句點。',
+  '鄭成功在台灣設立承天府，下轄天興、萬年二縣，改赤崁為東都，建立起漢人在台灣的第一個政權——史稱「東寧」。',
+  '然而，勝利的代價同樣沉重。長年的征戰與圍城，讓這個新生的政權從一開始，就必須面對它自己留下的傷痕。'
+];
+
+/* =====================================================================
+   GAME STATE
+===================================================================== */
+let state = null;
+function freshState(){
+  return {
+    stats:{ food:50, military:50, reputation:50, wealth:50 },
+    flags:{},
+    chapterIndex:0,
+    talked:{},          // npcId -> true
+    playerX: 60,
+    achievements:{}
+  };
+}
+
+let dev = { godMode:false };
+let mode = 'title';     // title | narration | transition | walking | dialogue | ending
+let narrQueue = [];
+let narrIndex = 0;
+let narrThenFn = null;
+let activeDialogue = null; // {defId, nodeId, npc}
+let cam = 0;
+let player = { x:60, vx:0, facing:1, walking:false };
+let keys = { left:false, right:false, interact:false };
+let lastToastAt = 0;
+let clock = 0;
+let lastTime = 0;
+
+const $ = id => document.getElementById(id);
+
+/* ---------- persistence ---------- */
+function loadStorage(){
+  try{ const raw = localStorage.getItem(STORAGE_KEY); if(raw) return JSON.parse(raw); }catch(e){}
+  return null;
+}
+function saveStorage(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      save:{ stats:state.stats, flags:state.flags, chapterIndex:state.chapterIndex, talked:state.talked, playerX:player.x },
+      achievements:state.achievements
+    }));
+  }catch(e){}
+}
+
+/* =====================================================================
+   CANVAS SETUP
+===================================================================== */
+const canvas = $('gameCanvas');
+const ctx = canvas.getContext('2d');
+let renderScale = 1;
+
+const BACKING_SCALE = 2; // fixed internal supersample factor; CSS size handles the actual fit
+function resize(){
+  const stageEl = $('stage');
+  const cw = stageEl.clientWidth, ch = stageEl.clientHeight;
+  renderScale = BACKING_SCALE;
+  canvas.width = LW*BACKING_SCALE;
+  canvas.height = LH*BACKING_SCALE;
+  ctx.imageSmoothingEnabled = false;
+
+  const gameAspect = LW/LH, boxAspect = cw/Math.max(1,ch);
+  let cssW, cssH;
+  if(boxAspect > gameAspect){ cssH = ch; cssW = ch*gameAspect; }
+  else { cssW = cw; cssH = cw/gameAspect; }
+  canvas.style.width = Math.floor(cssW)+'px';
+  canvas.style.height = Math.floor(cssH)+'px';
+}
+let rotateDismissed = false;
+function updateRotateOverlay(){
+  const portrait = window.innerHeight > window.innerWidth;
+  const shouldShow = portrait && !rotateDismissed && mode!=='title';
+  $('rotateOverlay').classList.toggle('hidden', !shouldShow);
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', ()=>setTimeout(resize,150));
+
+/* =====================================================================
+   STAT / ACHIEVEMENT HELPERS
+===================================================================== */
+const statKeys = ['food','military','reputation','wealth'];
+function clamp(v){ return Math.max(0, Math.min(100, v)); }
+
+function renderStats(prev){
+  statKeys.forEach(k=>{
+    const v = clamp(state.stats[k]);
+    $('fill'+cap(k)).style.width = v+'%';
+    $('num'+cap(k)).textContent = Math.round(v);
+  });
+}
+function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
+
+function applyEffect(effect){
+  if(!effect) return;
+  statKeys.forEach(k=>{ if(effect[k]) state.stats[k] = clamp(state.stats[k] + effect[k]); });
+  renderStats();
+}
+
+function showToast(text){
+  const el = $('achToast');
+  el.textContent = '🏆 '+text;
+  el.classList.remove('hidden');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(()=>el.classList.add('hidden'), 2600);
+}
+
+function unlockAchievement(id){
+  if(state.achievements[id]) return;
+  state.achievements[id] = true;
+  const all = [...ACHIEVEMENTS.endings, ...ACHIEVEMENTS.behaviors];
+  const a = all.find(x=>x.id===id);
+  if(a) showToast('成就解鎖：'+a.icon+' '+a.name);
+  saveStorage();
+  renderAchievementLists();
+}
+
+function checkTalkerAchievement(){
+  const totalNpcs = CHAPTERS.reduce((n,c)=>n+c.npcs.length,0);
+  const talkedCount = Object.keys(state.talked).length;
+  if(talkedCount >= totalNpcs) unlockAchievement('beh_talker');
+}
+
+function renderAchievementLists(){
+  const build = (list, container)=>{
+    container.innerHTML = '';
+    list.forEach(a=>{
+      const unlocked = !!state.achievements[a.id];
+      const row = document.createElement('div');
+      row.className = 'achRow'+(unlocked?'':' locked');
+      row.innerHTML = `<div class="ic">${unlocked?a.icon:'❓'}</div>
+        <div><div class="name pixel-font">${unlocked?a.name:'???'}</div><div class="desc">${unlocked?a.desc:'尚未解鎖'}</div></div>`;
+      container.appendChild(row);
+    });
+  };
+  build(ACHIEVEMENTS.endings, $('endingAchList'));
+  build(ACHIEVEMENTS.behaviors, $('behaviorAchList'));
+}
+
+/* =====================================================================
+   TOASTS ABOVE NPCS
+===================================================================== */
+function showPromptToast(text){
+  const now = performance.now();
+  if(now - lastToastAt < 800) return;
+  lastToastAt = now;
+  const el = $('promptToast');
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(showPromptToast._t);
+  showPromptToast._t = setTimeout(()=>el.classList.remove('show'), 1400);
+}
+
+/* =====================================================================
+   MODE TRANSITIONS
+===================================================================== */
+function goTitle(){
+  mode = 'title';
+  $('titleScreen').classList.remove('hidden');
+  $('dialoguePanel').classList.add('hidden');
+  $('touchControls').classList.add('hidden');
+  $('chapterCard').classList.add('hidden');
+  $('narrationScreen').classList.add('hidden');
+  $('hud').classList.add('hidden');
+  const saved = loadStorage();
+  $('btnContinue').classList.toggle('hidden', !saved);
+}
+
+function startNewGame(){
+  state = freshState();
+  player.x = 60; cam = 0;
+  renderStats();
+  $('titleScreen').classList.add('hidden');
+  $('hud').classList.remove('hidden');
+  $('touchControls').classList.remove('hidden');
+  runNarration(PROLOGUE, '序章・大明永曆十五年', ()=>enterChapter(0));
+}
+
+function continueGame(){
+  const saved = loadStorage();
+  state = freshState();
+  if(saved){
+    Object.assign(state.stats, saved.save.stats || {});
+    Object.assign(state.flags, saved.save.flags || {});
+    Object.assign(state.talked, saved.save.talked || {});
+    state.chapterIndex = saved.save.chapterIndex || 0;
+    Object.assign(state.achievements, saved.achievements || {});
+    player.x = saved.save.playerX || 60;
+  }
+  renderStats();
+  renderAchievementLists();
+  $('titleScreen').classList.add('hidden');
+  $('hud').classList.remove('hidden');
+  $('touchControls').classList.remove('hidden');
+  enterChapter(state.chapterIndex, true);
+}
+
+function runNarration(lines, eyebrow, thenFn){
+  mode = 'narration';
+  narrQueue = lines; narrIndex = 0; narrThenFn = thenFn;
+  $('narrEyebrow').textContent = eyebrow;
+  $('narrationScreen').classList.remove('hidden');
+  $('dialoguePanel').classList.add('hidden');
+  showNarrLine();
+}
+function showNarrLine(){
+  $('narrBody').textContent = narrQueue[narrIndex];
+}
+function advanceNarration(){
+  narrIndex++;
+  if(narrIndex >= narrQueue.length){
+    $('narrationScreen').classList.add('hidden');
+    const fn = narrThenFn; narrThenFn = null;
+    if(fn) fn();
+  } else {
+    showNarrLine();
+  }
+}
+
+function enterChapter(index, skipCard){
+  state.chapterIndex = index;
+  if(index >= CHAPTERS.length){ return runEpilogue(); }
+  const ch = CHAPTERS[index];
+  player.x = 40; cam = 0;
+  if(!skipCard){
+    ch.npcs.forEach(n=>{ /* keep talked history across chapters intact */ });
+  }
+  saveStorage();
+  const proceed = ()=>{
+    mode = 'walking';
+    $('hudChapterTitle').textContent = ch.num+'・'+ch.title;
+    $('chapterCard').classList.add('hidden');
+  };
+  mode = 'transition';
+  $('chapterCardNum').textContent = ch.num;
+  $('chapterCardName').textContent = ch.title;
+  $('chapterCardSub').textContent = ch.sub;
+  $('chapterCard').classList.remove('hidden');
+  setTimeout(proceed, 1500);
+}
+
+function runEpilogue(){
+  runNarration(EPILOGUE_PRE, '尾聲・東寧建制', showEnding);
+}
+
+function computeEnding(){
+  const s = state.stats;
+  const critical = statKeys.filter(k=>s[k] <= 30);
+  if(critical.length >= 2) return ENDINGS.turmoil;
+  if(critical.length === 0 && statKeys.every(k=>s[k] >= 65)) return ENDINGS.golden;
+  if(critical.includes('food')) return ENDINGS.famine;
+  if(critical.includes('military')) return ENDINGS.weak;
+  if(critical.includes('reputation')) return ENDINGS.unrest;
+  if(critical.includes('wealth')) return ENDINGS.poor;
+  return ENDINGS.stable;
+}
+
+function showEnding(){
+  const ending = computeEnding();
+  $('endingEmoji').textContent = ending.emoji;
+  $('endingTitle').textContent = ending.title;
+  $('endingText').textContent = ending.text;
+
+  const notes = [];
+  if(state.flags.tactic_stealth) notes.push('鹿耳門奇襲的膽識，成為後世傳頌的奇謀。');
+  else if(state.flags.tactic_assault) notes.push('熱蘭遮城下的強攻雖慘烈，卻也震懾了荷軍士氣。');
+  if(state.flags.diplomacy_soft) notes.push('對新港社的懷柔政策，讓漢原關係得以緩和共存。');
+  else if(state.flags.diplomacy_harsh) notes.push('鐵腕手段換來表面平靜，卻埋下日後衝突的種子。');
+  if(state.flags.policy_tuntian) notes.push('屯田制奠定了台灣農業開發的基礎。');
+  else if(state.flags.policy_levy) notes.push('強徵糧食解了燃眉之急，卻讓原漢矛盾更加尖銳。');
+  $('endingNote').textContent = notes.join(' ');
+
+  unlockAchievement(ending.id);
+  unlockAchievement('beh_finish');
+  checkTalkerAchievement();
+  saveStorage();
+
+  mode = 'ending';
+  $('endingModal').classList.remove('hidden');
+}
+
+/* =====================================================================
+   DIALOGUE ENGINE
+===================================================================== */
+function openDialogue(npc){
+  mode = 'dialogue';
+  activeDialogue = { defId: npc.dialogue, nodeId: DIALOGUES[npc.dialogue].start, npc };
+  $('dialoguePanel').classList.remove('hidden');
+  renderDialogueNode();
+}
+
+function currentNode(){
+  return DIALOGUES[activeDialogue.defId].nodes[activeDialogue.nodeId];
+}
+
+function renderDialogueNode(){
+  const node = currentNode();
+  const sprite = P[node.sprite] || P.koxinga;
+  drawPortrait($('dlgPortrait'), sprite);
+  $('dlgName').textContent = node.speaker;
+  $('dlgRole').textContent = node.role || '';
+  $('dlgText').textContent = node.text;
+
+  if(node.effect) applyEffect(node.effect);
+
+  const choicesEl = $('dlgChoices');
+  const footerEl = $('dlgFooter');
+  if(node.choices){
+    choicesEl.classList.remove('hidden');
+    footerEl.classList.add('hidden');
+    choicesEl.innerHTML = '';
+    node.choices.forEach(choice=>{
+      const btn = document.createElement('button');
+      btn.className = 'choiceBtn';
+      let html = choice.label;
+      if(dev.godMode && choice.effect){
+        const labels = {food:'糧食',military:'兵力',reputation:'聲望',wealth:'國庫'};
+        const parts = statKeys.filter(k=>choice.effect[k]).map(k=>labels[k]+(choice.effect[k]>0?'+':'')+choice.effect[k]);
+        if(parts.length) html += `<span class="choiceImpact">${parts.join(' ')}</span>`;
+      }
+      btn.innerHTML = html;
+      btn.addEventListener('click', ()=>{
+        if(choice.effect) applyEffect(choice.effect);
+        if(choice.flag) state.flags[choice.flag] = true;
+        activeDialogue.nodeId = choice.next;
+        renderDialogueNode();
+      });
+      choicesEl.appendChild(btn);
+    });
+  } else {
+    choicesEl.classList.add('hidden');
+    footerEl.classList.remove('hidden');
+  }
+}
+
+function advanceDialogue(){
+  const node = currentNode();
+  if(node.choices) return; // must click a choice button
+  if(node.next === null || node.next === undefined){
+    closeDialogue();
+  } else {
+    activeDialogue.nodeId = node.next;
+    renderDialogueNode();
+  }
+}
+
+function closeDialogue(){
+  state.talked[activeDialogue.npc.id] = true;
+  checkTalkerAchievement();
+  saveStorage();
+  activeDialogue = null;
+  $('dialoguePanel').classList.add('hidden');
+  mode = 'walking';
+}
+
+/* =====================================================================
+   INPUT
+===================================================================== */
+window.addEventListener('keydown', e=>{
+  if(['ArrowLeft','a','A'].includes(e.key)) keys.left = true;
+  if(['ArrowRight','d','D'].includes(e.key)) keys.right = true;
+  if(e.key === ' ' || e.key === 'Enter' || e.key === 'e' || e.key === 'E'){
+    e.preventDefault();
+    handleInteractKey();
+  }
+});
+window.addEventListener('keyup', e=>{
+  if(['ArrowLeft','a','A'].includes(e.key)) keys.left = false;
+  if(['ArrowRight','d','D'].includes(e.key)) keys.right = false;
+});
+
+function bindHold(el, onDown, onUp){
+  el.addEventListener('pointerdown', e=>{ e.preventDefault(); onDown(); });
+  ['pointerup','pointerleave','pointercancel'].forEach(ev=>el.addEventListener(ev, onUp));
+}
+bindHold($('btnLeft'), ()=>keys.left=true, ()=>keys.left=false);
+bindHold($('btnRight'), ()=>keys.right=true, ()=>keys.right=false);
+$('btnInteract').addEventListener('pointerdown', e=>{ e.preventDefault(); handleInteractKey(); });
+
+function handleInteractKey(){
+  if(mode === 'narration'){ advanceNarration(); return; }
+  if(mode === 'dialogue'){ advanceDialogue(); return; }
+  if(mode === 'walking'){
+    const ch = CHAPTERS[state.chapterIndex];
+    const near = ch.npcs.find(n=>Math.abs(n.x - player.x) < INTERACT_RANGE);
+    if(near) openDialogue(near);
+  }
+}
+
+$('narrationScreen').addEventListener('click', ()=>{ if(mode==='narration') advanceNarration(); });
+$('dlgContinue').addEventListener('click', ()=>{ if(mode==='dialogue') advanceDialogue(); });
+$('dialoguePanel').addEventListener('click', (e)=>{
+  if(mode==='dialogue' && !currentNode().choices && e.target.id !== 'dlgContinue') advanceDialogue();
+});
+
+/* =====================================================================
+   MAIN LOOP
+===================================================================== */
+function update(dt){
+  clock += dt;
+  if(mode !== 'walking') return;
+
+  const ch = CHAPTERS[state.chapterIndex];
+  player.vx = 0;
+  if(keys.left){ player.vx = -SPEED; player.facing = -1; }
+  if(keys.right){ player.vx = SPEED; player.facing = 1; }
+  player.walking = player.vx !== 0;
+  player.x = Math.max(20, Math.min(ch.width-20, player.x + player.vx*dt));
+
+  cam = Math.max(0, Math.min(Math.max(0, ch.width-LW), player.x - LW/2));
+
+  const near = ch.npcs.find(n=>Math.abs(n.x - player.x) < INTERACT_RANGE);
+  if(near) showPromptToast('按 空白／互動鈕 與「'+near.name+'」對話');
+
+  if(player.x >= ch.width - 30){
+    const allTalked = ch.npcs.every(n=>state.talked[n.id]);
+    if(allTalked){
+      enterChapter(state.chapterIndex+1);
+    } else {
+      player.x = ch.width - 30;
+      showPromptToast('先跟大家聊聊吧……');
+    }
+  }
+}
+
+function render(){
+  ctx.save();
+  ctx.scale(renderScale, renderScale);
+  ctx.clearRect(0,0,LW,LH);
+
+  if(mode === 'walking' || mode === 'dialogue'){
+    const ch = CHAPTERS[state.chapterIndex];
+    drawBackground(ctx, ch.theme, cam, ch.width);
+    ch.props.forEach(p=> drawProp(ctx, p.x - cam, p.type));
+
+    const SPRITE_CLEARANCE = 28;
+    let playerDrawX = player.x;
+    ch.npcs.forEach(n=>{
+      if(Math.abs(playerDrawX - n.x) < SPRITE_CLEARANCE){
+        playerDrawX = playerDrawX >= n.x ? n.x + SPRITE_CLEARANCE : n.x - SPRITE_CLEARANCE;
+      }
+    });
+    const entities = ch.npcs.map(n=>({x:n.x, draw:()=>drawHumanoid(ctx, n.x-cam, GROUND_Y, P[n.sprite]||P.koxinga, -1, false, clock)}));
+    entities.push({x:playerDrawX, draw:()=>drawHumanoid(ctx, playerDrawX-cam, GROUND_Y, P.koxinga, player.facing, player.walking, clock)});
+    entities.sort((a,b)=>a.x-b.x).forEach(e=>e.draw());
+
+    ch.npcs.forEach(n=>{
+      const sx = n.x - cam;
+      if(sx > -30 && sx < LW+30){
+        ctx.fillStyle = state.talked[n.id] ? 'rgba(232,196,104,0.5)' : '#e8c468';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        if(Math.abs(n.x-player.x) < INTERACT_RANGE+10){
+          ctx.fillText('▲', sx, GROUND_Y-72);
+        } else if(!state.talked[n.id]){
+          ctx.fillText('!', sx, GROUND_Y-74);
+        }
+      }
+    });
+  } else {
+    ctx.fillStyle = '#0a0d18';
+    ctx.fillRect(0,0,LW,LH);
+  }
+
+  ctx.restore();
+}
+
+function loop(ts){
+  if(!lastTime) lastTime = ts;
+  const dt = Math.min(0.05, (ts-lastTime)/1000);
+  lastTime = ts;
+  update(dt);
+  render();
+  updateRotateOverlay();
+  requestAnimationFrame(loop);
+}
+
+/* =====================================================================
+   TITLE / MENU BINDINGS
+===================================================================== */
+$('btnNewGame').addEventListener('click', startNewGame);
+$('btnContinue').addEventListener('click', continueGame);
+$('btnTitleAchievements').addEventListener('click', ()=>{
+  if(!state) state = freshState();
+  renderAchievementLists();
+  $('achievementModal').classList.remove('hidden');
+});
+$('closeAch').addEventListener('click', ()=> $('achievementModal').classList.add('hidden'));
+
+$('endingRestartBtn').addEventListener('click', ()=>{
+  $('endingModal').classList.add('hidden');
+  goTitle();
+});
+
+/* ---------- hidden dev menu ---------- */
+let titleClicks = 0, titleClickTimer = null;
+function registerSecretTap(){
+  titleClicks++;
+  clearTimeout(titleClickTimer);
+  titleClickTimer = setTimeout(()=>titleClicks=0, 1500);
+  if(titleClicks >= 5){
+    titleClicks = 0;
+    if(!state) state = freshState();
+    $('devMenu').classList.remove('hidden');
+  }
+}
+$('gameTitleClicker').addEventListener('click', registerSecretTap);
+$('hudChapterTitle').addEventListener('click', registerSecretTap);
+$('closeDevMenu').addEventListener('click', ()=> $('devMenu').classList.add('hidden'));
+$('godModeToggle').addEventListener('click', ()=>{
+  dev.godMode = !dev.godMode;
+  $('godModeToggle').classList.toggle('on', dev.godMode);
+  $('cheatBanner').classList.toggle('hidden', !dev.godMode);
+  if(mode==='dialogue') renderDialogueNode();
+});
+$('maxStatsBtn').addEventListener('click', ()=>{
+  if(!state) state = freshState();
+  statKeys.forEach(k=>state.stats[k]=80);
+  renderStats();
+});
+$('unlockAllBtn').addEventListener('click', ()=>{
+  if(!state) state = freshState();
+  [...ACHIEVEMENTS.endings, ...ACHIEVEMENTS.behaviors].forEach(a=>state.achievements[a.id]=true);
+  saveStorage();
+  renderAchievementLists();
+});
+$('skipChapterBtn').addEventListener('click', ()=>{
+  if(!state || mode==='title') return;
+  if(mode==='dialogue') closeDialogue();
+  enterChapter(state.chapterIndex+1);
+});
+
+$('dismissRotate').addEventListener('click', ()=>{
+  rotateDismissed = true;
+  $('rotateOverlay').classList.add('hidden');
+});
+
+/* =====================================================================
+   INIT
+===================================================================== */
+state = freshState();
+renderStats();
+renderAchievementLists();
+goTitle();
+resize();
+requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
