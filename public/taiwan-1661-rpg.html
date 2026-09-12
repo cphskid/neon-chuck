@@ -49,9 +49,21 @@
   #hud .stat .num{ font-family:'Press Start 2P',monospace; font-size:8px; color:var(--paper); flex:0 0 auto; width:20px; text-align:right; }
   #hud .chtitle{
     font-family:'Press Start 2P',monospace; font-size:8px; color:var(--gold-dim);
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:34vw; flex:0 0 auto;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:28vw; flex:0 0 auto;
     cursor:pointer; padding:2px 4px;
   }
+  #hud .muteBtn{
+    flex:0 0 auto; cursor:pointer; font-size:15px; line-height:1;
+    padding:3px 5px; border:1px solid var(--panel-edge-lit); border-radius:4px;
+  }
+  #hud .muteBtn:active{ background:rgba(232,196,104,0.18); }
+  .audioRow{ display:flex; gap:10px; margin-top:16px; }
+  .audioTgl{
+    font-family:'Press Start 2P',monospace; font-size:9px; cursor:pointer;
+    padding:7px 12px; border-radius:4px; border:2px solid var(--panel-edge-lit);
+    color:var(--gold-dim); opacity:.5;
+  }
+  .audioTgl.on{ color:var(--gold); border-color:var(--gold-dim); opacity:1; }
 
   /* ---------- Canvas stage ---------- */
   #stage{ position:relative; flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; background:#000; overflow:hidden; }
@@ -189,6 +201,7 @@
     <div class="stat"><span class="icon">🤝</span><div class="track"><div class="fill" id="fillReputation" style="background:var(--reputation);width:50%;"></div></div><span class="num" id="numReputation">50</span></div>
     <div class="stat"><span class="icon">💰</span><div class="track"><div class="fill" id="fillWealth" style="background:var(--wealth);width:50%;"></div></div><span class="num" id="numWealth">50</span></div>
     <div class="chtitle" id="hudChapterTitle">序章</div>
+    <div class="muteBtn" id="btnMute" title="音訊開關">🔊</div>
   </div>
 
   <div id="stage">
@@ -220,6 +233,10 @@
       <button class="menuBtn" id="btnNewGame">開始新遊戲</button>
       <button class="menuBtn secondary hidden" id="btnContinue" style="margin-top:10px;">繼續進度</button>
       <button class="menuBtn secondary" id="btnTitleAchievements" style="margin-top:10px;">📜 成就圖鑑</button>
+      <div class="audioRow">
+        <span class="audioTgl on" id="tglBgm">♪ 音樂</span>
+        <span class="audioTgl on" id="tglSfx">🔔 音效</span>
+      </div>
       <div class="howto">方向鍵 ◀▶ 或畫面按鈕行走，靠近路人後按空白鍵／互動鈕開始對話。手機請橫放遊玩。</div>
     </div>
 
@@ -295,6 +312,349 @@ const PX = 4;                     // logical pixels per sprite-grid cell
 const SPEED = 90;                 // world units / second
 const INTERACT_RANGE = 46;
 const STORAGE_KEY = 'taiwan1661_rpg_v1';
+const AUDIO_KEY = 'taiwan1661_rpg_audio';
+
+/* =====================================================================
+   AUDIO ENGINE — procedural chiptune (no external assets; CSP blocks them)
+   Square/triangle leads + noise percussion, pentatonic scales.
+===================================================================== */
+const SEMITONE = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
+function noteFreq(note){
+  if(!note || note === '-') return 0;
+  const m = /^([A-G]#?)(-?\d)$/.exec(note);
+  if(!m) return 0;
+  const midi = SEMITONE[m[1]] + (parseInt(m[2],10)+1)*12;
+  return 440 * Math.pow(2, (midi-69)/12);
+}
+
+// Patterns are at 8th-note resolution. '-' = rest.
+const TRACKS = {
+  // Stately, D minor pentatonic (D F G A C) — sparse and ceremonial.
+  title:{
+    bpm:78,
+    voices:[
+      { wave:'square', gain:0.13, len:0.9, pattern:[
+        'D4','-','-','-','F4','-','A4','-',
+        'G4','-','-','-','F4','-','D4','-',
+        'A3','-','C4','-','D4','-','F4','-',
+        'D4','-','-','-','-','-','-','-'
+      ]},
+      { wave:'triangle', gain:0.22, len:1.6, pattern:[
+        'D2','-','-','-','D2','-','-','-',
+        'A2','-','-','-','A2','-','-','-',
+        'F2','-','-','-','F2','-','-','-',
+        'D2','-','-','-','A2','-','-','-'
+      ]},
+      { wave:'triangle', gain:0.07, len:3.0, pattern:[
+        'A3','-','-','-','-','-','-','-',
+        'D4','-','-','-','-','-','-','-',
+        'C4','-','-','-','-','-','-','-',
+        'A3','-','-','-','-','-','-','-'
+      ]}
+    ],
+    perc:null
+  },
+  // Movement, D major pentatonic (D E F# A B) — the travelling/field theme.
+  field:{
+    bpm:104,
+    voices:[
+      { wave:'square', gain:0.11, len:0.8, pattern:[
+        'D4','-','E4','F#4','A4','-','F#4','-',
+        'E4','-','D4','-','B3','-','D4','-',
+        'F#4','-','A4','-','B4','-','A4','F#4',
+        'E4','-','D4','-','-','-','-','-'
+      ]},
+      { wave:'triangle', gain:0.2, len:0.9, pattern:[
+        'D2','-','D2','-','A2','-','A2','-',
+        'B2','-','B2','-','F#2','-','F#2','-',
+        'G2','-','G2','-','D2','-','D2','-',
+        'A2','-','A2','-','A2','-','A2','-'
+      ]}
+    ],
+    perc:[
+      'k','-','h','-','s','-','h','-',
+      'k','-','h','-','s','-','h','-',
+      'k','-','h','-','s','-','h','-',
+      'k','-','h','k','s','-','h','h'
+    ]
+  }
+};
+
+const CHAPTER_AMBIENCE = {
+  harbor:'waves', sea:'waves', provintia:'wind',
+  town:'town', siege:'siege', camp:'night', gate:'wind'
+};
+
+const AUDIO = {
+  ctx:null, ready:false,
+  master:null, bgmGain:null, sfxGain:null, ambGain:null,
+  noiseBuf:null,
+  enabled:{ bgm:true, sfx:true },
+  cur:{ track:null, ambience:null },
+  seq:{ timer:null, step:0, nextTime:0, track:null },
+  ambNodes:[], ambTimer:null,
+
+  loadPrefs(){
+    try{
+      const raw = localStorage.getItem(AUDIO_KEY);
+      if(raw) Object.assign(this.enabled, JSON.parse(raw));
+    }catch(e){}
+  },
+  savePrefs(){
+    try{ localStorage.setItem(AUDIO_KEY, JSON.stringify(this.enabled)); }catch(e){}
+  },
+
+  // Must be called from a user gesture (browsers block audio otherwise).
+  unlock(){
+    if(this.ready){
+      if(this.ctx.state === 'suspended') this.ctx.resume();
+      return;
+    }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0.9;
+    this.master.connect(this.ctx.destination);
+
+    this.bgmGain = this.ctx.createGain();
+    this.bgmGain.gain.value = this.enabled.bgm ? 1 : 0;
+    this.bgmGain.connect(this.master);
+
+    this.sfxGain = this.ctx.createGain();
+    this.sfxGain.gain.value = this.enabled.sfx ? 1 : 0;
+    this.sfxGain.connect(this.master);
+
+    this.ambGain = this.ctx.createGain();
+    this.ambGain.gain.value = this.enabled.bgm ? 0.55 : 0;
+    this.ambGain.connect(this.master);
+
+    // one shared noise buffer for percussion + ambience
+    const len = this.ctx.sampleRate * 2;
+    this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = this.noiseBuf.getChannelData(0);
+    for(let i=0;i<len;i++) d[i] = Math.random()*2-1;
+
+    this.ready = true;
+  },
+
+  setEnabled(kind, on){
+    this.enabled[kind] = on;
+    this.savePrefs();
+    if(!this.ready) return;
+    const t = this.ctx.currentTime;
+    if(kind === 'bgm'){
+      this.bgmGain.gain.setTargetAtTime(on?1:0, t, 0.05);
+      this.ambGain.gain.setTargetAtTime(on?0.55:0, t, 0.05);
+    } else {
+      this.sfxGain.gain.setTargetAtTime(on?1:0, t, 0.05);
+    }
+  },
+
+  /* ---------- primitives ---------- */
+  tone(o){
+    if(!this.ready) return;
+    const t0 = o.t || this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = o.wave || 'square';
+    osc.frequency.setValueAtTime(o.freq, t0);
+    if(o.slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(1,o.slideTo), t0 + o.dur);
+    const peak = o.gain != null ? o.gain : 0.2;
+    const atk = o.attack != null ? o.attack : 0.008;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(peak, t0 + atk);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + o.dur);
+    osc.connect(g);
+    g.connect(o.dest || this.sfxGain);
+    osc.start(t0);
+    osc.stop(t0 + o.dur + 0.02);
+  },
+
+  noise(o){
+    if(!this.ready) return;
+    const t0 = o.t || this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = o.filter || 'lowpass';
+    filt.frequency.setValueAtTime(o.freq || 1000, t0);
+    if(o.freqTo) filt.frequency.exponentialRampToValueAtTime(Math.max(40,o.freqTo), t0 + o.dur);
+    const g = this.ctx.createGain();
+    const peak = o.gain != null ? o.gain : 0.2;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(peak, t0 + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + o.dur);
+    src.connect(filt); filt.connect(g); g.connect(o.dest || this.sfxGain);
+    src.start(t0);
+    src.stop(t0 + o.dur + 0.02);
+  },
+
+  /* ---------- SFX ---------- */
+  sfx(name){
+    if(!this.ready || !this.enabled.sfx) return;
+    const t = this.ctx.currentTime;
+    switch(name){
+      case 'blip':
+        this.tone({freq: 700 + Math.random()*90, wave:'square', dur:0.028, gain:0.05});
+        break;
+      case 'step':
+        this.noise({freq:520, dur:0.05, gain:0.035, filter:'lowpass'});
+        break;
+      case 'talk':
+        this.tone({freq:520, wave:'square', dur:0.07, gain:0.09});
+        this.tone({freq:780, wave:'square', dur:0.09, gain:0.07, t:t+0.06});
+        break;
+      case 'select':
+        this.tone({freq:620, wave:'square', dur:0.06, gain:0.1});
+        this.tone({freq:930, wave:'square', dur:0.1, gain:0.09, t:t+0.05});
+        break;
+      case 'confirm':
+        this.tone({freq:440, wave:'square', dur:0.08, gain:0.1});
+        this.tone({freq:660, wave:'square', dur:0.12, gain:0.09, t:t+0.07});
+        break;
+      case 'statUp':
+        [523,659,880].forEach((f,i)=> this.tone({freq:f, wave:'square', dur:0.11, gain:0.075, t:t+i*0.055}));
+        break;
+      case 'statDown':
+        [392,294].forEach((f,i)=> this.tone({freq:f, wave:'square', dur:0.16, gain:0.08, t:t+i*0.075}));
+        break;
+      case 'achievement':
+        [523,659,784,1047].forEach((f,i)=> this.tone({freq:f, wave:'square', dur:0.16, gain:0.085, t:t+i*0.085}));
+        break;
+      case 'chapter':
+        this.tone({freq:110, wave:'triangle', dur:1.6, gain:0.24, attack:0.01});
+        this.noise({freq:1800, freqTo:200, dur:1.4, gain:0.1, filter:'lowpass'});
+        break;
+      case 'cannon':
+        this.noise({freq:420, freqTo:60, dur:0.9, gain:0.16, filter:'lowpass', dest:this.ambGain});
+        break;
+      case 'ending':
+        [262,330,392,523].forEach((f,i)=> this.tone({freq:f, wave:'triangle', dur:1.8, gain:0.11, t:t+i*0.13}));
+        break;
+    }
+  },
+
+  /* ---------- BGM sequencer (lookahead scheduling) ---------- */
+  playBgm(id){
+    if(!this.ready || this.cur.track === id) return;
+    this.stopBgm();
+    const track = TRACKS[id];
+    if(!track) return;
+    this.cur.track = id;
+    this.seq.track = track;
+    this.seq.step = 0;
+    this.seq.nextTime = this.ctx.currentTime + 0.1;
+    this.seq.timer = setInterval(()=>this.scheduler(), 25);
+  },
+
+  stopBgm(){
+    if(this.seq.timer){ clearInterval(this.seq.timer); this.seq.timer = null; }
+    this.cur.track = null;
+    this.seq.track = null;
+  },
+
+  scheduler(){
+    const s = this.seq;
+    if(!s.track || !this.ctx) return;
+    const stepDur = 60 / s.track.bpm / 2; // 8th notes
+    while(s.nextTime < this.ctx.currentTime + 0.15){
+      this.scheduleStep(s.track, s.step, s.nextTime, stepDur);
+      s.step++;
+      s.nextTime += stepDur;
+    }
+  },
+
+  scheduleStep(track, step, when, stepDur){
+    track.voices.forEach(v=>{
+      const note = v.pattern[step % v.pattern.length];
+      const f = noteFreq(note);
+      if(f > 0){
+        this.tone({freq:f, wave:v.wave, dur:stepDur*(v.len||0.9), gain:v.gain, t:when, dest:this.bgmGain});
+      }
+    });
+    if(track.perc){
+      const hit = track.perc[step % track.perc.length];
+      if(hit === 'k'){
+        this.tone({freq:150, slideTo:48, wave:'triangle', dur:0.16, gain:0.3, t:when, dest:this.bgmGain});
+      } else if(hit === 's'){
+        this.noise({freq:2400, dur:0.13, gain:0.11, filter:'highpass', t:when, dest:this.bgmGain});
+      } else if(hit === 'h'){
+        this.noise({freq:7000, dur:0.04, gain:0.045, filter:'highpass', t:when, dest:this.bgmGain});
+      }
+    }
+  },
+
+  /* ---------- Ambience ---------- */
+  setAmbience(kind){
+    if(!this.ready || this.cur.ambience === kind) return;
+    this.stopAmbience();
+    this.cur.ambience = kind;
+    if(!kind) return;
+
+    const mk = (filterType, freq, gain, lfoRate, lfoDepth)=>{
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.noiseBuf; src.loop = true;
+      const filt = this.ctx.createBiquadFilter();
+      filt.type = filterType; filt.frequency.value = freq;
+      const g = this.ctx.createGain(); g.gain.value = gain;
+      if(lfoRate){
+        const lfo = this.ctx.createOscillator();
+        const lg = this.ctx.createGain();
+        lfo.frequency.value = lfoRate; lg.gain.value = lfoDepth;
+        lfo.connect(lg); lg.connect(g.gain); lfo.start();
+        this.ambNodes.push(lfo);
+      }
+      src.connect(filt); filt.connect(g); g.connect(this.ambGain);
+      src.start();
+      this.ambNodes.push(src);
+      return g;
+    };
+
+    if(kind === 'waves')      mk('lowpass', 420, 0.10, 0.13, 0.055);
+    else if(kind === 'wind')  mk('bandpass', 720, 0.075, 0.09, 0.035);
+    else if(kind === 'town')  mk('lowpass', 300, 0.05, 0.22, 0.018);
+    else if(kind === 'siege'){ mk('bandpass', 640, 0.06, 0.11, 0.03); }
+    else if(kind === 'night') mk('lowpass', 240, 0.035, 0.07, 0.012);
+
+    // sparse one-shots layered over the bed
+    if(kind === 'siege' || kind === 'waves'){
+      const fire = ()=>{
+        if(this.cur.ambience !== kind) return;
+        if(Math.random() < (kind==='siege' ? 0.75 : 0.3)) this.sfxAmbient('cannon');
+        this.ambTimer = setTimeout(fire, 4000 + Math.random()*9000);
+      };
+      this.ambTimer = setTimeout(fire, 3000 + Math.random()*5000);
+    }
+    if(kind === 'night'){
+      const chirp = ()=>{
+        if(this.cur.ambience !== kind) return;
+        const base = 3600 + Math.random()*1600;
+        for(let i=0;i<3;i++){
+          this.tone({freq:base, wave:'sine', dur:0.035, gain:0.02,
+                     t:this.ctx.currentTime + i*0.06, dest:this.ambGain});
+        }
+        this.ambTimer = setTimeout(chirp, 700 + Math.random()*2200);
+      };
+      this.ambTimer = setTimeout(chirp, 500 + Math.random()*1200);
+    }
+  },
+
+  // ambience one-shots bypass the sfx mute (they belong to the BGM/atmosphere bus)
+  sfxAmbient(name){
+    if(!this.ready || !this.enabled.bgm) return;
+    if(name === 'cannon'){
+      this.noise({freq:420, freqTo:60, dur:0.9, gain:0.14, filter:'lowpass', dest:this.ambGain});
+    }
+  },
+
+  stopAmbience(){
+    if(this.ambTimer){ clearTimeout(this.ambTimer); this.ambTimer = null; }
+    this.ambNodes.forEach(n=>{ try{ n.stop(); }catch(e){} });
+    this.ambNodes = [];
+    this.cur.ambience = null;
+  }
+};
 
 /* =====================================================================
    SPRITE RENDERING (procedural pixel-block humanoids)
@@ -847,8 +1207,13 @@ function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
 
 function applyEffect(effect){
   if(!effect) return;
-  statKeys.forEach(k=>{ if(effect[k]) state.stats[k] = clamp(state.stats[k] + effect[k]); });
+  let net = 0;
+  statKeys.forEach(k=>{
+    if(effect[k]){ net += effect[k]; state.stats[k] = clamp(state.stats[k] + effect[k]); }
+  });
   renderStats();
+  if(net > 0) AUDIO.sfx('statUp');
+  else if(net < 0) AUDIO.sfx('statDown');
 }
 
 function showToast(text){
@@ -864,7 +1229,7 @@ function unlockAchievement(id){
   state.achievements[id] = true;
   const all = [...ACHIEVEMENTS.endings, ...ACHIEVEMENTS.behaviors];
   const a = all.find(x=>x.id===id);
-  if(a) showToast('成就解鎖：'+a.icon+' '+a.name);
+  if(a){ showToast('成就解鎖：'+a.icon+' '+a.name); AUDIO.sfx('achievement'); }
   saveStorage();
   renderAchievementLists();
 }
@@ -916,6 +1281,8 @@ function goTitle(){
   $('chapterCard').classList.add('hidden');
   $('narrationScreen').classList.add('hidden');
   $('hud').classList.add('hidden');
+  AUDIO.stopAmbience();
+  AUDIO.playBgm('title');
   const saved = loadStorage();
   $('btnContinue').classList.toggle('hidden', !saved);
 }
@@ -924,6 +1291,9 @@ function startNewGame(){
   state = freshState();
   player.x = 60; cam = 0;
   renderStats();
+  AUDIO.unlock();
+  AUDIO.sfx('confirm');
+  AUDIO.stopBgm();
   $('titleScreen').classList.add('hidden');
   $('hud').classList.remove('hidden');
   $('touchControls').classList.remove('hidden');
@@ -943,6 +1313,8 @@ function continueGame(){
   }
   renderStats();
   renderAchievementLists();
+  AUDIO.unlock();
+  AUDIO.sfx('confirm');
   $('titleScreen').classList.add('hidden');
   $('hud').classList.remove('hidden');
   $('touchControls').classList.remove('hidden');
@@ -980,6 +1352,9 @@ function enterChapter(index, skipCard){
     ch.npcs.forEach(n=>{ /* keep talked history across chapters intact */ });
   }
   saveStorage();
+  AUDIO.sfx('chapter');
+  AUDIO.playBgm('field');
+  AUDIO.setAmbience(CHAPTER_AMBIENCE[ch.theme] || null);
   const proceed = ()=>{
     mode = 'walking';
     $('hudChapterTitle').textContent = ch.num+'・'+ch.title;
@@ -1024,6 +1399,10 @@ function showEnding(){
   else if(state.flags.policy_levy) notes.push('強徵糧食解了燃眉之急，卻讓原漢矛盾更加尖銳。');
   $('endingNote').textContent = notes.join(' ');
 
+  AUDIO.stopBgm();
+  AUDIO.stopAmbience();
+  AUDIO.sfx('ending');
+
   unlockAchievement(ending.id);
   unlockAchievement('beh_finish');
   checkTalkerAchievement();
@@ -1036,10 +1415,42 @@ function showEnding(){
 /* =====================================================================
    DIALOGUE ENGINE
 ===================================================================== */
+const typer = { timer:null, full:'', idx:0, active:false, onDone:null };
+const TYPE_SPEED = 36;   // ms per character — Chinese chars are whole words, so slower than a latin crawl
+const BLIP_EVERY = 3;    // one blip per N characters, so it reads as speech rather than a buzz
+
+function startTyping(text, onDone){
+  stopTyping();
+  typer.full = text;
+  typer.idx = 0;
+  typer.active = true;
+  typer.onDone = onDone;
+  $('dlgText').textContent = '';
+  typer.timer = setInterval(()=>{
+    typer.idx++;
+    $('dlgText').textContent = typer.full.slice(0, typer.idx);
+    const ch = typer.full.charAt(typer.idx-1);
+    if(typer.idx % BLIP_EVERY === 0 && ch.trim() && !'，。！？、…—「」（）'.includes(ch)) AUDIO.sfx('blip');
+    if(typer.idx >= typer.full.length) finishTyping();
+  }, TYPE_SPEED);
+}
+function stopTyping(){
+  if(typer.timer){ clearInterval(typer.timer); typer.timer = null; }
+  typer.active = false;
+}
+function finishTyping(){
+  if(!typer.active) return;
+  stopTyping();
+  $('dlgText').textContent = typer.full;
+  const fn = typer.onDone; typer.onDone = null;
+  if(fn) fn();
+}
+
 function openDialogue(npc){
   mode = 'dialogue';
   activeDialogue = { defId: npc.dialogue, nodeId: DIALOGUES[npc.dialogue].start, npc };
   $('dialoguePanel').classList.remove('hidden');
+  AUDIO.sfx('talk');
   renderDialogueNode();
 }
 
@@ -1053,41 +1464,45 @@ function renderDialogueNode(){
   drawPortrait($('dlgPortrait'), sprite);
   $('dlgName').textContent = node.speaker;
   $('dlgRole').textContent = node.role || '';
-  $('dlgText').textContent = node.text;
 
   if(node.effect) applyEffect(node.effect);
 
   const choicesEl = $('dlgChoices');
   const footerEl = $('dlgFooter');
-  if(node.choices){
-    choicesEl.classList.remove('hidden');
-    footerEl.classList.add('hidden');
-    choicesEl.innerHTML = '';
-    node.choices.forEach(choice=>{
-      const btn = document.createElement('button');
-      btn.className = 'choiceBtn';
-      let html = choice.label;
-      if(dev.godMode && choice.effect){
-        const labels = {food:'糧食',military:'兵力',reputation:'聲望',wealth:'國庫'};
-        const parts = statKeys.filter(k=>choice.effect[k]).map(k=>labels[k]+(choice.effect[k]>0?'+':'')+choice.effect[k]);
-        if(parts.length) html += `<span class="choiceImpact">${parts.join(' ')}</span>`;
-      }
-      btn.innerHTML = html;
-      btn.addEventListener('click', ()=>{
-        if(choice.effect) applyEffect(choice.effect);
-        if(choice.flag) state.flags[choice.flag] = true;
-        activeDialogue.nodeId = choice.next;
-        renderDialogueNode();
+  choicesEl.classList.add('hidden');
+  footerEl.classList.add('hidden');
+
+  startTyping(node.text, ()=>{
+    if(node.choices){
+      choicesEl.classList.remove('hidden');
+      choicesEl.innerHTML = '';
+      node.choices.forEach(choice=>{
+        const btn = document.createElement('button');
+        btn.className = 'choiceBtn';
+        let html = choice.label;
+        if(dev.godMode && choice.effect){
+          const labels = {food:'糧食',military:'兵力',reputation:'聲望',wealth:'國庫'};
+          const parts = statKeys.filter(k=>choice.effect[k]).map(k=>labels[k]+(choice.effect[k]>0?'+':'')+choice.effect[k]);
+          if(parts.length) html += `<span class="choiceImpact">${parts.join(' ')}</span>`;
+        }
+        btn.innerHTML = html;
+        btn.addEventListener('click', ()=>{
+          AUDIO.sfx('select');
+          if(choice.effect) applyEffect(choice.effect);
+          if(choice.flag) state.flags[choice.flag] = true;
+          activeDialogue.nodeId = choice.next;
+          renderDialogueNode();
+        });
+        choicesEl.appendChild(btn);
       });
-      choicesEl.appendChild(btn);
-    });
-  } else {
-    choicesEl.classList.add('hidden');
-    footerEl.classList.remove('hidden');
-  }
+    } else {
+      footerEl.classList.remove('hidden');
+    }
+  });
 }
 
 function advanceDialogue(){
+  if(typer.active){ finishTyping(); return; }
   const node = currentNode();
   if(node.choices) return; // must click a choice button
   if(node.next === null || node.next === undefined){
@@ -1099,6 +1514,7 @@ function advanceDialogue(){
 }
 
 function closeDialogue(){
+  stopTyping();
   state.talked[activeDialogue.npc.id] = true;
   checkTalkerAchievement();
   saveStorage();
@@ -1142,9 +1558,11 @@ function handleInteractKey(){
 }
 
 $('narrationScreen').addEventListener('click', ()=>{ if(mode==='narration') advanceNarration(); });
-$('dlgContinue').addEventListener('click', ()=>{ if(mode==='dialogue') advanceDialogue(); });
+$('dlgContinue').addEventListener('click', (e)=>{ e.stopPropagation(); if(mode==='dialogue') advanceDialogue(); });
 $('dialoguePanel').addEventListener('click', (e)=>{
-  if(mode==='dialogue' && !currentNode().choices && e.target.id !== 'dlgContinue') advanceDialogue();
+  if(mode !== 'dialogue') return;
+  if(e.target.closest('.choiceBtn')) return; // the button's own handler takes it
+  advanceDialogue();
 });
 
 /* =====================================================================
@@ -1160,6 +1578,15 @@ function update(dt){
   if(keys.right){ player.vx = SPEED; player.facing = 1; }
   player.walking = player.vx !== 0;
   player.x = Math.max(20, Math.min(ch.width-20, player.x + player.vx*dt));
+
+  // footstep on each stride of the walk cycle (matches the sprite's leg swap)
+  if(player.walking){
+    const phase = Math.sin(clock*10);
+    if(phase >= 0 !== player._lastPhase){
+      player._lastPhase = phase >= 0;
+      AUDIO.sfx('step');
+    }
+  }
 
   cam = Math.max(0, Math.min(Math.max(0, ch.width-LW), player.x - LW/2));
 
@@ -1290,8 +1717,52 @@ $('dismissRotate').addEventListener('click', ()=>{
 });
 
 /* =====================================================================
+   AUDIO CONTROLS
+===================================================================== */
+function anyAudioOn(){ return AUDIO.enabled.bgm || AUDIO.enabled.sfx; }
+function refreshAudioUI(){
+  $('btnMute').textContent = anyAudioOn() ? '🔊' : '🔇';
+  $('tglBgm').classList.toggle('on', AUDIO.enabled.bgm);
+  $('tglSfx').classList.toggle('on', AUDIO.enabled.sfx);
+}
+$('btnMute').addEventListener('click', (e)=>{
+  e.stopPropagation();
+  const on = !anyAudioOn();
+  AUDIO.setEnabled('bgm', on);
+  AUDIO.setEnabled('sfx', on);
+  refreshAudioUI();
+});
+$('tglBgm').addEventListener('click', ()=>{
+  AUDIO.setEnabled('bgm', !AUDIO.enabled.bgm);
+  refreshAudioUI();
+});
+$('tglSfx').addEventListener('click', ()=>{
+  AUDIO.setEnabled('sfx', !AUDIO.enabled.sfx);
+  refreshAudioUI();
+  AUDIO.sfx('confirm');
+});
+
+// Browsers block audio until a user gesture; unlock on the first one.
+function firstGestureUnlock(){
+  AUDIO.unlock();
+  if(mode === 'title') AUDIO.playBgm('title');
+  document.removeEventListener('pointerdown', firstGestureUnlock);
+  document.removeEventListener('keydown', firstGestureUnlock);
+}
+document.addEventListener('pointerdown', firstGestureUnlock);
+document.addEventListener('keydown', firstGestureUnlock);
+
+document.addEventListener('visibilitychange', ()=>{
+  if(!AUDIO.ready) return;
+  if(document.hidden) AUDIO.ctx.suspend();
+  else AUDIO.ctx.resume();
+});
+
+/* =====================================================================
    INIT
 ===================================================================== */
+AUDIO.loadPrefs();
+refreshAudioUI();
 state = freshState();
 renderStats();
 renderAchievementLists();
