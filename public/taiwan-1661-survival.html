@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>1661台灣大生存：國姓爺的抉擇</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700;900&display=swap');
+
+  :root {
+    color-scheme: light;
+  }
+
+  * { -webkit-tap-highlight-color: transparent; }
+
+  /* Fallback in case the Tailwind CDN is blocked/slow: keep .hidden working regardless. */
+  .hidden { display: none !important; }
+
+  body {
+    background-color: #fdf6e3;
+    background-image:
+      radial-gradient(circle at 20% 20%, rgba(139,94,52,0.08) 0%, transparent 40%),
+      radial-gradient(circle at 80% 80%, rgba(139,94,52,0.08) 0%, transparent 40%),
+      repeating-linear-gradient(0deg, rgba(139,94,52,0.03) 0px, rgba(139,94,52,0.03) 1px, transparent 1px, transparent 40px);
+    font-family: 'Noto Serif TC', serif;
+    color: #4a3728;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .paper-card {
+    background: #fbf0d9;
+    border: 3px solid #8b5e34;
+    box-shadow: 0 4px 0 #8b5e34, 0 8px 20px rgba(74,55,40,0.3), inset 0 0 40px rgba(139,94,52,0.1);
+    position: relative;
+  }
+
+  .paper-card::before {
+    content: '';
+    position: absolute;
+    inset: 6px;
+    border: 1px solid rgba(139,94,52,0.4);
+    pointer-events: none;
+  }
+
+  .seal {
+    font-family: 'Noto Serif TC', serif;
+  }
+
+  .stat-bar-track {
+    background: rgba(139,94,52,0.15);
+    border: 1px solid rgba(139,94,52,0.4);
+  }
+
+  .stat-bar-fill {
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.4s;
+  }
+
+  .stat-value {
+    transition: color 0.3s;
+  }
+
+  .flash-red {
+    animation: flashRed 0.6s ease;
+  }
+  .flash-green {
+    animation: flashGreen 0.6s ease;
+  }
+  @keyframes flashRed {
+    0%, 100% { transform: scale(1); }
+    30% { transform: scale(1.15); color: #b91c1c; }
+  }
+  @keyframes flashGreen {
+    0%, 100% { transform: scale(1); }
+    30% { transform: scale(1.15); color: #15803d; }
+  }
+
+  #cardStage {
+    perspective: 1000px;
+  }
+
+  .card-enter {
+    animation: cardEnter 0.45s ease forwards;
+  }
+  @keyframes cardEnter {
+    from { opacity: 0; transform: translateX(60px) rotate(4deg) scale(0.9); }
+    to { opacity: 1; transform: translateX(0) rotate(0) scale(1); }
+  }
+
+  .card-exit-left {
+    animation: cardExitLeft 0.35s ease forwards;
+  }
+  @keyframes cardExitLeft {
+    from { opacity: 1; transform: translateX(0) rotate(0); }
+    to { opacity: 0; transform: translateX(-120px) rotate(-10deg); }
+  }
+
+  .card-exit-right {
+    animation: cardExitRight 0.35s ease forwards;
+  }
+  @keyframes cardExitRight {
+    from { opacity: 1; transform: translateX(0) rotate(0); }
+    to { opacity: 0; transform: translateX(120px) rotate(10deg); }
+  }
+
+  .choice-btn {
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  }
+  .choice-btn:active {
+    transform: scale(0.96);
+  }
+
+  .title-cheat {
+    color: #b91c1c !important;
+    text-shadow: 0 0 8px rgba(185,28,28,0.5), 0 0 20px rgba(185,28,28,0.3);
+    animation: cheatPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes cheatPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  .cheat-banner {
+    animation: cheatBannerIn 0.4s ease;
+  }
+  @keyframes cheatBannerIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .achievement-locked {
+    filter: grayscale(1);
+    opacity: 0.55;
+  }
+
+  .modal-backdrop {
+    background: rgba(74,55,40,0.55);
+    backdrop-filter: blur(2px);
+  }
+
+  .modal-panel {
+    animation: modalIn 0.25s ease;
+  }
+  @keyframes modalIn {
+    from { opacity: 0; transform: translateY(20px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .toggle-switch {
+    width: 46px;
+    height: 26px;
+    background: #d9c9a3;
+    border: 2px solid #8b5e34;
+    border-radius: 999px;
+    position: relative;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .toggle-switch.on {
+    background: #b91c1c;
+  }
+  .toggle-knob {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 18px;
+    height: 18px;
+    background: #fdf6e3;
+    border-radius: 999px;
+    transition: transform 0.2s;
+  }
+  .toggle-switch.on .toggle-knob {
+    transform: translateX(20px);
+  }
+
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background: #8b5e34; border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: rgba(139,94,52,0.1); }
+</style>
+</head>
+<body class="min-h-screen flex justify-center">
+<div class="w-full max-w-md mx-auto px-4 py-5 flex flex-col min-h-screen">
+
+  <!-- Header -->
+  <div class="text-center mb-4 select-none">
+    <h1 id="gameTitle" class="text-2xl font-black tracking-wide cursor-pointer inline-block" style="color:#4a3728;">
+      1661台灣大生存
+    </h1>
+    <p class="text-xs mt-1 tracking-widest text-[#8b5e34]">— 國姓爺的抉擇 —</p>
+    <div id="cheatBanner" class="hidden cheat-banner mt-1 text-[11px] font-bold text-red-700 border border-red-700 rounded-full px-3 py-0.5 inline-block bg-red-50">
+      ⚠ 作弊模式已啟動 · 上帝視角開啟中
+    </div>
+  </div>
+
+  <!-- Resource Bars -->
+  <div class="paper-card rounded-lg p-3 mb-4">
+    <div class="grid grid-cols-2 gap-x-4 gap-y-2">
+      <div>
+        <div class="flex justify-between items-baseline text-xs mb-1">
+          <span>🌾 糧食</span>
+          <span id="foodValue" class="stat-value font-bold">50</span>
+        </div>
+        <div class="stat-bar-track h-2.5 rounded-full overflow-hidden">
+          <div id="foodBar" class="stat-bar-fill h-full rounded-full" style="width:50%; background:#84a441;"></div>
+        </div>
+      </div>
+      <div>
+        <div class="flex justify-between items-baseline text-xs mb-1">
+          <span>⚔️ 兵力</span>
+          <span id="militaryValue" class="stat-value font-bold">50</span>
+        </div>
+        <div class="stat-bar-track h-2.5 rounded-full overflow-hidden">
+          <div id="militaryBar" class="stat-bar-fill h-full rounded-full" style="width:50%; background:#b91c1c;"></div>
+        </div>
+      </div>
+      <div>
+        <div class="flex justify-between items-baseline text-xs mb-1">
+          <span>🤝 聲望</span>
+          <span id="reputationValue" class="stat-value font-bold">50</span>
+        </div>
+        <div class="stat-bar-track h-2.5 rounded-full overflow-hidden">
+          <div id="reputationBar" class="stat-bar-fill h-full rounded-full" style="width:50%; background:#2563a8;"></div>
+        </div>
+      </div>
+      <div>
+        <div class="flex justify-between items-baseline text-xs mb-1">
+          <span>💰 國庫</span>
+          <span id="wealthValue" class="stat-value font-bold">50</span>
+        </div>
+        <div class="stat-bar-track h-2.5 rounded-full overflow-hidden">
+          <div id="wealthBar" class="stat-bar-fill h-full rounded-full" style="width:50%; background:#c8961e;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="text-center text-[11px] text-[#8b5e34] mt-2 border-t border-[#8b5e34]/30 pt-1.5">
+      第 <span id="turnCount" class="font-bold">1</span> 回合
+    </div>
+  </div>
+
+  <!-- Card Stage -->
+  <div id="cardStage" class="flex-1 flex flex-col justify-center mb-4">
+    <div id="eventCard" class="paper-card rounded-lg p-5">
+      <div class="text-center mb-3">
+        <span id="cardCharacter" class="inline-block text-sm font-bold bg-[#8b5e34] text-[#fdf6e3] px-3 py-1 rounded-full">通事 何斌</span>
+      </div>
+      <p id="cardText" class="text-[15px] leading-relaxed text-center mb-5 min-h-[80px] flex items-center justify-center">
+        事件文字
+      </p>
+      <div class="flex flex-col gap-3">
+        <button id="leftChoiceBtn" class="choice-btn w-full text-left bg-[#f4e4c1] hover:bg-[#eddab0] border-2 border-[#8b5e34] rounded-lg px-4 py-3">
+          <div class="flex items-center gap-2">
+            <span class="text-lg">◀</span>
+            <span id="leftChoiceText" class="font-bold text-sm flex-1">選項一</span>
+          </div>
+          <div id="leftChoiceImpact" class="hidden text-[11px] mt-1 pl-6 text-[#6b4423] font-mono"></div>
+        </button>
+        <button id="rightChoiceBtn" class="choice-btn w-full text-left bg-[#f4e4c1] hover:bg-[#eddab0] border-2 border-[#8b5e34] rounded-lg px-4 py-3">
+          <div class="flex items-center gap-2">
+            <span id="rightChoiceText" class="font-bold text-sm flex-1">選項二</span>
+            <span class="text-lg">▶</span>
+          </div>
+          <div id="rightChoiceImpact" class="hidden text-[11px] mt-1 pl-6 text-[#6b4423] font-mono text-right"></div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer buttons -->
+  <div class="flex gap-3">
+    <button id="openAchievements" class="flex-1 bg-[#8b5e34] text-[#fdf6e3] font-bold text-sm py-2.5 rounded-lg shadow active:scale-95 transition">
+      📜 成就圖鑑
+    </button>
+    <button id="restartBtn" class="flex-1 bg-[#4a3728] text-[#fdf6e3] font-bold text-sm py-2.5 rounded-lg shadow active:scale-95 transition">
+      🔄 重新開始
+    </button>
+  </div>
+
+</div>
+
+<!-- Game Over Modal -->
+<div id="gameOverModal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+  <div class="modal-panel paper-card rounded-lg p-6 max-w-sm w-full text-center">
+    <div id="gameOverEmoji" class="text-5xl mb-3">💀</div>
+    <h2 id="gameOverTitle" class="text-xl font-black mb-2 text-[#b91c1c]">結局標題</h2>
+    <p id="gameOverText" class="text-sm leading-relaxed mb-2">結局說明文字</p>
+    <p class="text-xs text-[#8b5e34] mb-5">存活了 <span id="gameOverTurns" class="font-bold">0</span> 回合</p>
+    <button id="gameOverRestartBtn" class="w-full bg-[#8b5e34] text-[#fdf6e3] font-bold py-2.5 rounded-lg active:scale-95 transition">
+      再試一次
+    </button>
+  </div>
+</div>
+
+<!-- Achievement Modal -->
+<div id="achievementModal" class="hidden fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+  <div class="modal-panel paper-card rounded-lg p-5 max-w-sm w-full max-h-[85vh] flex flex-col">
+    <div class="flex justify-between items-center mb-3">
+      <h2 class="text-lg font-black">📜 成就圖鑑</h2>
+      <button id="closeAchievements" class="text-2xl leading-none px-2">&times;</button>
+    </div>
+    <div class="overflow-y-auto pr-1">
+      <h3 class="text-sm font-bold mb-2 text-[#8b5e34] border-b border-[#8b5e34]/40 pb-1">💀 結局成就</h3>
+      <div id="endingAchievementList" class="grid grid-cols-1 gap-2 mb-4"></div>
+      <h3 class="text-sm font-bold mb-2 text-[#8b5e34] border-b border-[#8b5e34]/40 pb-1">🏅 行為成就</h3>
+      <div id="behaviorAchievementList" class="grid grid-cols-1 gap-2"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Achievement Toast -->
+<div id="achievementToast" class="hidden fixed top-4 left-1/2 -translate-x-1/2 z-[60] bg-[#4a3728] text-[#fdf6e3] px-4 py-2.5 rounded-lg shadow-lg text-sm font-bold flex items-center gap-2 max-w-[90vw]">
+  <span>🏆</span>
+  <span id="achievementToastText">成就解鎖</span>
+</div>
+
+<!-- Hidden Dev Menu -->
+<div id="devMenu" class="hidden fixed inset-0 modal-backdrop z-[70] flex items-center justify-center p-4">
+  <div class="modal-panel paper-card rounded-lg p-5 max-w-xs w-full">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-base font-black text-[#b91c1c]">🛠️ 開發者選單</h2>
+      <button id="closeDevMenu" class="text-2xl leading-none px-2">&times;</button>
+    </div>
+    <div class="flex flex-col gap-4 text-sm">
+      <div class="flex items-center justify-between">
+        <span>👁️ 上帝視角 (God Mode)</span>
+        <div id="godModeToggle" class="toggle-switch"><div class="toggle-knob"></div></div>
+      </div>
+      <button id="maxStatsBtn" class="w-full bg-[#c8961e] text-[#fdf6e3] font-bold py-2 rounded-lg active:scale-95 transition text-left px-4">
+        📈 資源全滿（回到 80）
+      </button>
+      <button id="unlockAllBtn" class="w-full bg-[#b91c1c] text-[#fdf6e3] font-bold py-2 rounded-lg active:scale-95 transition text-left px-4">
+        🔓 一鍵解鎖全圖鑑
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ---------- Data ----------
+  const EVENTS = [
+    {
+      id: 1,
+      character: "通事 何斌",
+      text: "國姓爺，前方就是大員。熱蘭遮城大砲火力猛，但今日鹿耳門水道大漲潮，有機會直入台江內海！",
+      leftChoice: { text: "正面硬攻熱蘭遮城", impact: { military: -40, food: -10, reputation: 0, wealth: 0 } },
+      rightChoice: { text: "趁大潮強渡鹿耳門", impact: { military: 20, food: -10, reputation: 10, wealth: 0 } }
+    },
+    {
+      id: 2,
+      character: "荷蘭長官 揆一",
+      text: "我們退守熱蘭遮城，準備死守等待巴達維亞的援軍！",
+      leftChoice: { text: "斷絕水源補給逼降", impact: { military: 10, food: -20, reputation: 0, wealth: 0 } },
+      rightChoice: { text: "派大軍強攻", impact: { military: -30, food: 0, reputation: -10, wealth: 0 } }
+    },
+    {
+      id: 3,
+      character: "明鄭將領",
+      text: "主公，軍糧快吃完了，好幾萬大軍再這樣下去會餓死！",
+      leftChoice: { text: "實施「屯田制」", impact: { military: -10, food: 40, reputation: 0, wealth: 0 } },
+      rightChoice: { text: "向平埔族強行徵收", impact: { military: 10, food: 30, reputation: -40, wealth: 0 } }
+    },
+    {
+      id: 4,
+      character: "平埔族長老",
+      text: "你們漢人開墾土地，影響了我們打獵的傳統領域，年輕人很生氣！",
+      leftChoice: { text: "送布匹與鹽巴安撫", impact: { military: 0, food: 0, reputation: 30, wealth: -20 } },
+      rightChoice: { text: "派軍隊武力鎮壓", impact: { military: -20, food: 10, reputation: -50, wealth: 0 } }
+    },
+    {
+      id: 5,
+      character: "走私商人",
+      text: "國姓爺，收購了一批台灣鹿皮跟蔗糖，要安排船隊賣到日本嗎？",
+      leftChoice: { text: "全力發展跨國貿易", impact: { military: 0, food: -10, reputation: 0, wealth: 40 } },
+      rightChoice: { text: "太危險，留著自己用", impact: { military: 10, food: 10, reputation: 0, wealth: -20 } }
+    }
+  ];
+
+  const ENDINGS = {
+    food: { id: 'end_food', emoji: '🎣', title: '痛風退場', text: '軍糧見底，國姓爺只能天天去安平港釣烏魚果腹，最後吃到痛風發作，大軍就此解散。' },
+    military: { id: 'end_military', emoji: '⚓', title: '全軍覆沒', text: '戰力歸零，殘兵無力再戰，只能狼狽搭船退回廈門，鄭氏在台灣的基業毀於一旦。' },
+    reputation: { id: 'end_reputation', emoji: '🔥', title: '民怨四起', text: '原住民與漢人再也受不了苛政與壓迫，群起反抗，將國姓爺趕出台灣。' },
+    wealth: { id: 'end_wealth', emoji: '💸', title: '破產倒閉', text: '國庫空虛，發不出軍餉，將領們一氣之下棄職而去，改行當起海盜。' },
+    overflow: { id: 'end_overflow', emoji: '🦋', title: '歷史轉折', text: '某項數值爆滿，引發內部權力急速膨脹與腐敗，蝴蝶效應悄然改寫了歷史的走向。' }
+  };
+
+  const ACHIEVEMENTS = {
+    endings: [
+      { id: 'end_food', name: '痛風退場', desc: '因糧食歸零而結束遊戲', icon: '🎣' },
+      { id: 'end_military', name: '兵變下台', desc: '因兵力歸零而結束遊戲', icon: '⚓' },
+      { id: 'end_reputation', name: '民怨四起', desc: '因聲望歸零而結束遊戲', icon: '🔥' },
+      { id: 'end_wealth', name: '破產倒閉', desc: '因國庫歸零而結束遊戲', icon: '💸' },
+      { id: 'end_overflow', name: '歷史轉折', desc: '因任一數值爆滿而結束遊戲', icon: '🦋' }
+    ],
+    behaviors: [
+      { id: 'beh_peace', name: '和平主義者', desc: '連續 3 次選擇不扣聲望的選項', icon: '☮️' },
+      { id: 'beh_trade', name: '貿易大亨', desc: '國庫累積達到 80 以上', icon: '💰' },
+      { id: 'beh_survivor', name: '生存大師', desc: '存活超過 10 回合', icon: '🏆' }
+    ]
+  };
+
+  const STORAGE_KEY = 'taiwan1661_achievements';
+
+  // ---------- State ----------
+  let state = {
+    food: 50,
+    military: 50,
+    reputation: 50,
+    wealth: 50,
+    turn: 1,
+    currentEvent: null,
+    isAnimating: false,
+    peaceStreak: 0
+  };
+
+  let devState = {
+    godMode: false
+  };
+
+  let unlocked = loadAchievements();
+
+  function loadAchievements() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return {};
+  }
+
+  function saveAchievements() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(unlocked));
+    } catch (e) {}
+  }
+
+  function unlockAchievement(id) {
+    if (unlocked[id]) return;
+    unlocked[id] = true;
+    saveAchievements();
+    const all = [...ACHIEVEMENTS.endings, ...ACHIEVEMENTS.behaviors];
+    const ach = all.find(a => a.id === id);
+    if (ach) showAchievementToast(ach);
+    renderAchievementList();
+  }
+
+  let toastTimer = null;
+  function showAchievementToast(ach) {
+    const toast = document.getElementById('achievementToast');
+    document.getElementById('achievementToastText').textContent = `成就解鎖：${ach.icon} ${ach.name}`;
+    toast.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.add('hidden'), 2600);
+  }
+
+  // ---------- DOM refs ----------
+  const $ = id => document.getElementById(id);
+  const statKeys = ['food', 'military', 'reputation', 'wealth'];
+  const statColors = {
+    food: '#84a441',
+    military: '#b91c1c',
+    reputation: '#2563a8',
+    wealth: '#c8961e'
+  };
+
+  function clamp(v) { return Math.max(0, Math.min(100, v)); }
+
+  function renderStats(prevState) {
+    statKeys.forEach(key => {
+      const val = clamp(state[key]);
+      const bar = $(key + 'Bar');
+      const label = $(key + 'Value');
+      bar.style.width = val + '%';
+      label.textContent = Math.round(val);
+      if (prevState) {
+        const diff = state[key] - prevState[key];
+        if (diff > 0) {
+          label.classList.remove('flash-red');
+          void label.offsetWidth;
+          label.classList.add('flash-green');
+        } else if (diff < 0) {
+          label.classList.remove('flash-green');
+          void label.offsetWidth;
+          label.classList.add('flash-red');
+        }
+      }
+    });
+    $('turnCount').textContent = state.turn;
+  }
+
+  function formatImpact(impact) {
+    const labels = { food: '糧食', military: '兵力', reputation: '聲望', wealth: '國庫' };
+    const parts = [];
+    statKeys.forEach(key => {
+      const v = impact[key] || 0;
+      if (v !== 0) parts.push(`${labels[key]}${v > 0 ? '+' : ''}${v}`);
+    });
+    return parts.length ? parts.join(' ') : '無影響';
+  }
+
+  function renderCard(event) {
+    $('cardCharacter').textContent = event.character;
+    $('cardText').textContent = event.text;
+    $('leftChoiceText').textContent = event.leftChoice.text;
+    $('rightChoiceText').textContent = event.rightChoice.text;
+
+    const leftImpactEl = $('leftChoiceImpact');
+    const rightImpactEl = $('rightChoiceImpact');
+    if (devState.godMode) {
+      leftImpactEl.textContent = formatImpact(event.leftChoice.impact);
+      rightImpactEl.textContent = formatImpact(event.rightChoice.impact);
+      leftImpactEl.classList.remove('hidden');
+      rightImpactEl.classList.remove('hidden');
+    } else {
+      leftImpactEl.classList.add('hidden');
+      rightImpactEl.classList.add('hidden');
+    }
+  }
+
+  function pickRandomEvent() {
+    return EVENTS[Math.floor(Math.random() * EVENTS.length)];
+  }
+
+  function newTurn(firstLoad) {
+    state.currentEvent = pickRandomEvent();
+    const stage = $('eventCard');
+    if (!firstLoad) {
+      stage.classList.add('card-enter');
+      void stage.offsetWidth;
+    } else {
+      stage.classList.add('card-enter');
+    }
+    renderCard(state.currentEvent);
+    setTimeout(() => stage.classList.remove('card-enter'), 460);
+  }
+
+  function checkGameOver() {
+    for (const key of statKeys) {
+      if (state[key] <= 0) return ENDINGS[key];
+    }
+    for (const key of statKeys) {
+      if (state[key] >= 100) return ENDINGS.overflow;
+    }
+    return null;
+  }
+
+  function checkBehaviorAchievements(impact) {
+    if ((impact.reputation || 0) >= 0) {
+      state.peaceStreak++;
+    } else {
+      state.peaceStreak = 0;
+    }
+    if (state.peaceStreak >= 3) unlockAchievement('beh_peace');
+
+    if (state.wealth >= 80) unlockAchievement('beh_trade');
+
+    if (state.turn >= 10) unlockAchievement('beh_survivor');
+  }
+
+  function applyChoice(choice, direction) {
+    if (state.isAnimating) return;
+    state.isAnimating = true;
+
+    const stage = $('eventCard');
+    stage.classList.add(direction === 'left' ? 'card-exit-left' : 'card-exit-right');
+
+    setTimeout(() => {
+      const prevState = { ...state };
+      statKeys.forEach(key => {
+        state[key] = clamp(state[key] + (choice.impact[key] || 0));
+      });
+      renderStats(prevState);
+      checkBehaviorAchievements(choice.impact);
+
+      const ending = checkGameOver();
+      if (ending) {
+        setTimeout(() => showGameOver(ending), 350);
+        return;
+      }
+
+      state.turn++;
+      stage.classList.remove('card-exit-left', 'card-exit-right');
+      newTurn(false);
+      state.isAnimating = false;
+    }, 340);
+  }
+
+  function showGameOver(ending) {
+    $('gameOverEmoji').textContent = ending.emoji;
+    $('gameOverTitle').textContent = ending.title;
+    $('gameOverText').textContent = ending.text;
+    $('gameOverTurns').textContent = state.turn;
+    $('gameOverModal').classList.remove('hidden');
+    unlockAchievement(ending.id);
+  }
+
+  function resetGame() {
+    state = {
+      food: 50,
+      military: 50,
+      reputation: 50,
+      wealth: 50,
+      turn: 1,
+      currentEvent: null,
+      isAnimating: false,
+      peaceStreak: 0
+    };
+    renderStats();
+    $('gameOverModal').classList.add('hidden');
+    newTurn(true);
+  }
+
+  // ---------- Achievement Panel ----------
+  function renderAchievementList() {
+    const endingList = $('endingAchievementList');
+    const behaviorList = $('behaviorAchievementList');
+    endingList.innerHTML = '';
+    behaviorList.innerHTML = '';
+
+    ACHIEVEMENTS.endings.forEach(ach => {
+      endingList.appendChild(buildAchievementCard(ach));
+    });
+    ACHIEVEMENTS.behaviors.forEach(ach => {
+      behaviorList.appendChild(buildAchievementCard(ach));
+    });
+  }
+
+  function buildAchievementCard(ach) {
+    const isUnlocked = !!unlocked[ach.id];
+    const div = document.createElement('div');
+    div.className = `flex items-center gap-3 border-2 border-[#8b5e34] rounded-lg px-3 py-2 bg-[#f4e4c1] ${isUnlocked ? '' : 'achievement-locked'}`;
+    div.innerHTML = `
+      <div class="text-2xl">${isUnlocked ? ach.icon : '❓'}</div>
+      <div class="flex-1 min-w-0">
+        <div class="font-bold text-sm">${isUnlocked ? ach.name : '???'}</div>
+        <div class="text-xs text-[#6b4423]">${isUnlocked ? ach.desc : '尚未解鎖'}</div>
+      </div>
+    `;
+    return div;
+  }
+
+  function unlockAllAchievements() {
+    [...ACHIEVEMENTS.endings, ...ACHIEVEMENTS.behaviors].forEach(a => {
+      unlocked[a.id] = true;
+    });
+    saveAchievements();
+    renderAchievementList();
+  }
+
+  // ---------- Hidden Dev Menu ----------
+  let titleClickCount = 0;
+  let titleClickTimer = null;
+
+  function handleTitleClick() {
+    titleClickCount++;
+    clearTimeout(titleClickTimer);
+    titleClickTimer = setTimeout(() => { titleClickCount = 0; }, 1500);
+    if (titleClickCount >= 5) {
+      titleClickCount = 0;
+      $('devMenu').classList.remove('hidden');
+    }
+  }
+
+  function updateCheatVisuals() {
+    const title = $('gameTitle');
+    const banner = $('cheatBanner');
+    if (devState.godMode) {
+      title.classList.add('title-cheat');
+      banner.classList.remove('hidden');
+    } else {
+      title.classList.remove('title-cheat');
+      banner.classList.add('hidden');
+    }
+    if (state.currentEvent) renderCard(state.currentEvent);
+  }
+
+  function toggleGodMode() {
+    devState.godMode = !devState.godMode;
+    $('godModeToggle').classList.toggle('on', devState.godMode);
+    updateCheatVisuals();
+  }
+
+  function maxStats() {
+    const prevState = { ...state };
+    statKeys.forEach(key => { state[key] = 80; });
+    renderStats(prevState);
+  }
+
+  // ---------- Event bindings ----------
+  $('gameTitle').addEventListener('click', handleTitleClick);
+
+  $('leftChoiceBtn').addEventListener('click', () => {
+    if (!state.currentEvent) return;
+    applyChoice(state.currentEvent.leftChoice, 'left');
+  });
+  $('rightChoiceBtn').addEventListener('click', () => {
+    if (!state.currentEvent) return;
+    applyChoice(state.currentEvent.rightChoice, 'right');
+  });
+
+  $('restartBtn').addEventListener('click', resetGame);
+  $('gameOverRestartBtn').addEventListener('click', resetGame);
+
+  $('openAchievements').addEventListener('click', () => {
+    renderAchievementList();
+    $('achievementModal').classList.remove('hidden');
+  });
+  $('closeAchievements').addEventListener('click', () => {
+    $('achievementModal').classList.add('hidden');
+  });
+
+  $('closeDevMenu').addEventListener('click', () => {
+    $('devMenu').classList.add('hidden');
+  });
+  $('godModeToggle').addEventListener('click', toggleGodMode);
+  $('maxStatsBtn').addEventListener('click', maxStats);
+  $('unlockAllBtn').addEventListener('click', unlockAllAchievements);
+
+  // ---------- Init ----------
+  renderStats();
+  renderAchievementList();
+  newTurn(true);
+})();
+</script>
+</body>
+</html>
