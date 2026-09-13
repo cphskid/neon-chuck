@@ -6,11 +6,25 @@
 <title>大員冒險：1661</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
+  /* Tailwind's preflight normally sets this; do it ourselves so borders don't
+     overflow the layout when the CDN is unavailable. */
+  *,*::before,*::after{ box-sizing:border-box; }
+  html,body{ height:100%; }
   body{
+    margin:0; overflow:hidden;
     background:#1b2430;
     font-family:'Noto Sans TC','Microsoft JhengHei',sans-serif;
     -webkit-tap-highlight-color:transparent;
   }
+  /* The whole game is one viewport-tall column: the board flexes into
+     whatever space the top bar and D-pad leave, so it fits any phone,
+     tablet or desktop without scrolling (and with or without Tailwind). */
+  .app{
+    height:100vh; height:100dvh;
+    max-width:820px; margin:0 auto; padding:6px;
+    display:flex; flex-direction:column; gap:4px;
+  }
+  .stageWrap{ flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; }
   #gameCanvas{
     background:#5b8c3e;
     border:4px solid #8b5e34;
@@ -25,7 +39,14 @@
      Tailwind is a CDN and school/office networks block CDNs; if it fails to
      load, the game must still be playable, so show/hide never relies on it. */
   .hidden{ display:none !important; }
-  .stage{ position:relative; width:480px; max-width:100%; margin:0 auto; }
+  /* square board that fits the leftover box in both directions */
+  .stage{
+    position:relative; aspect-ratio:1/1;
+    height:100%; width:auto;
+    max-width:min(760px,100%); max-height:100%;
+    margin:0 auto;
+  }
+  #gameCanvas{ display:block; width:100%; height:100%; }
   /* plain-but-sane layout if the CDN never answers */
   .row{ display:flex; align-items:center; gap:8px; }
   #inventory{ display:flex; gap:8px; }
@@ -36,37 +57,63 @@
     background:rgba(15,23,32,.96);
   }
   .slot{
-    width:44px;height:44px;display:flex;align-items:center;justify-content:center;
-    font-size:26px;background:rgba(0,0,0,.3);border:2px solid #8b5e34;border-radius:6px;
+    width:36px;height:36px;display:flex;align-items:center;justify-content:center;
+    font-size:22px;background:rgba(0,0,0,.3);border:2px solid #8b5e34;border-radius:6px;
   }
   .slot.empty{ opacity:.35; }
-  #dialogBox{ transition:opacity .15s, transform .15s; }
+  /* floats over the bottom of the board, RPG-style, so phones keep the
+     vertical space for the D-pad instead of stacking another panel */
+  #dialogBox{
+    position:absolute; left:8px; right:8px; bottom:8px; z-index:4;
+    transition:opacity .15s, transform .15s;
+    background:rgba(28,42,58,.96);
+  }
   #dialogBox.hide{ opacity:0; transform:translateY(10px); pointer-events:none; }
+
+  /* ---------- touch controls ---------- */
+  #touchControls{
+    flex:0 0 auto;
+    display:flex; align-items:center; justify-content:space-between;
+    gap:14px; margin:4px auto 0; width:min(560px,100%);
+    touch-action:manipulation; user-select:none;
+  }
+  .dpad{ display:grid; grid-template-columns:repeat(3,56px); grid-template-rows:repeat(3,44px); gap:5px; }
+  .dbtn, #btnAction{
+    display:flex; align-items:center; justify-content:center;
+    background:#3d5166; color:#ffe08a; border:3px solid #8b5e34; border-radius:10px;
+    font-size:22px; font-weight:bold; cursor:pointer;
+    touch-action:manipulation; user-select:none; -webkit-user-select:none;
+  }
+  .dbtn:active, #btnAction:active{ background:#5b7a94; transform:scale(.94); }
+  #btnAction{
+    width:86px; height:86px; border-radius:50%; font-size:14px; line-height:1.25;
+    text-align:center; flex-direction:column;
+  }
+  .dpad .spacer{ visibility:hidden; }
   .blink{ animation:blink 1s steps(2,start) infinite; }
   @keyframes blink{ 0%,100%{opacity:1} 50%{opacity:.3} }
 </style>
 </head>
-<body class="min-h-screen flex items-start justify-center p-3">
+<body>
 
-<div class="w-full max-w-[560px] flex flex-col gap-3">
+<div class="app">
 
-  <!-- ===== Top bar: title + inventory + BGM toggle ===== -->
-  <div class="bg-[#2b3a4a] border-4 border-[#8b5e34] rounded-lg p-3">
-    <div class="row flex items-center justify-between gap-2 mb-2">
-      <h1 class="pixel text-amber-300 font-bold text-lg">大員冒險：1661</h1>
+  <!-- ===== Top bar: one compact row so phones keep the height for the board ===== -->
+  <div class="bg-[#2b3a4a] border-4 border-[#8b5e34] rounded-lg px-2 py-1" style="flex:0 0 auto;">
+    <div class="row">
+      <h1 id="gameTitle" class="pixel text-amber-300 font-bold"
+          style="font-size:12px;line-height:1.3;white-space:nowrap;">大員冒險<br>1661</h1>
+      <div id="inventory"></div>
+      <span id="mapName" class="pixel text-slate-300"
+            style="font-size:10px;margin-left:auto;white-space:nowrap;"></span>
       <button id="bgmBtn"
-        class="pixel text-xs bg-[#3d5166] hover:bg-[#4a6480] text-amber-200 border-2 border-[#8b5e34] rounded px-3 py-1">
-        🎵 音樂 ON
-      </button>
-    </div>
-    <div class="row flex items-center gap-2">
-      <span class="pixel text-xs text-amber-200 shrink-0">背包</span>
-      <div id="inventory" class="flex gap-2"></div>
-      <span id="mapName" class="pixel text-xs text-slate-300 ml-auto shrink-0"></span>
+        class="pixel bg-[#3d5166] text-amber-200 border-2 border-[#8b5e34] rounded"
+        style="font-size:16px;padding:4px 8px;">🎵</button>
     </div>
   </div>
 
   <!-- ===== Canvas + overlays ===== -->
+  <div class="stageWrap">
   <div class="stage">
     <canvas id="gameCanvas" width="480" height="480" class="block mx-auto"></canvas>
 
@@ -75,7 +122,7 @@
       <div class="text-5xl mb-3">🏰⚔️🌊</div>
       <h2 class="pixel text-amber-300 text-2xl font-bold mb-2">大員冒險：1661</h2>
       <p class="text-slate-300 text-sm mb-1">扮演鄭成功，蒐集三樣寶物，找出攻下熱蘭遮城的水路！</p>
-      <p class="text-slate-400 text-xs mb-5">方向鍵／WASD 移動　空白鍵 對話與撿東西</p>
+      <p class="text-slate-400 text-xs mb-5">用下方方向鍵移動，圓鈕對話<br>（電腦也可用 ↑↓←→ / WASD 與空白鍵）</p>
       <button id="startBtn"
         class="pixel bg-amber-400 hover:bg-amber-300 text-[#1b2430] font-bold text-lg px-8 py-4 rounded-lg border-4 border-amber-600 shadow-lg">
         ▶ 啟動遊戲 / 開啟音效
@@ -95,23 +142,40 @@
         🔄 再玩一次
       </button>
     </div>
-  </div>
 
-  <!-- ===== Dialog box ===== -->
-  <div id="dialogBox"
-    class="hide bg-[#2b3a4a] border-4 border-amber-500 rounded-lg p-4 min-h-[92px] flex flex-col justify-between">
-    <div class="flex items-start gap-3">
-      <span id="dialogFace" class="text-3xl shrink-0">👲</span>
-      <div>
-        <div id="dialogName" class="pixel text-amber-300 text-sm font-bold mb-1">通事 何斌</div>
-        <div id="dialogText" class="text-slate-100 text-sm leading-relaxed">…</div>
+    <!-- Dialog box: floats over the bottom of the board -->
+    <div id="dialogBox"
+      class="hide border-4 border-amber-500 rounded-lg p-3">
+      <div class="flex items-start gap-3">
+        <span id="dialogFace" class="text-3xl shrink-0">👲</span>
+        <div>
+          <div id="dialogName" class="pixel text-amber-300 text-sm font-bold mb-1">通事 何斌</div>
+          <div id="dialogText" class="text-slate-100 text-sm leading-relaxed">…</div>
+        </div>
       </div>
+      <div class="text-right pixel text-xs text-amber-200 blink mt-1">點一下繼續 ▶</div>
     </div>
-    <div class="text-right pixel text-xs text-amber-200 blink mt-2">按空白鍵繼續 ▶</div>
+  </div>
   </div>
 
-  <div class="text-center text-slate-400 text-xs pixel pb-4">
-    移動：↑↓←→ / WASD　·　互動：空白鍵　·　除錯：C 鍵拿到全部道具
+  <!-- ===== Touch controls (primary input on phones / tablets) ===== -->
+  <div id="touchControls">
+    <div class="dpad">
+      <div class="spacer"></div>
+      <div class="dbtn" id="padUp"    data-dir="up">▲</div>
+      <div class="spacer"></div>
+      <div class="dbtn" id="padLeft"  data-dir="left">◀</div>
+      <div class="spacer"></div>
+      <div class="dbtn" id="padRight" data-dir="right">▶</div>
+      <div class="spacer"></div>
+      <div class="dbtn" id="padDown"  data-dir="down">▼</div>
+      <div class="spacer"></div>
+    </div>
+    <div id="btnAction">對話<br>撿東西</div>
+  </div>
+
+  <div class="text-center text-slate-400 pixel" style="font-size:10px;line-height:14px;height:14px;overflow:hidden;flex:0 0 auto;">
+    方向鍵移動　·　圓鈕對話／撿東西　·　電腦可用 WASD 與空白鍵
   </div>
 </div>
 
@@ -521,7 +585,7 @@ function talkTo(npc){
       showDialog(npc.emoji, npc.name, '太感謝了！這個鹿皮 🦌 給你。');
     } else {
       audio.dialog();
-      showDialog(npc.emoji, npc.name, '漢人，我們需要武器趕走猛獸。找來『鐵器 🪓』，我就給你『鹿皮 🦌』。');
+      showDialog(npc.emoji, npc.name, '漢人，我們需要鐵製的獵具，才好上山打獵。找來『鐵器 🪓』，我就給你『鹿皮 🦌』。');
     }
   } else if(npc.id === 'hebin'){
     if(hasItem('deer')){
@@ -576,6 +640,51 @@ function handleInput(e){
 }
 window.addEventListener('keydown', handleInput);
 
+/* ---- Touch / pointer controls: the primary input on phones and tablets.
+       They call exactly the same tryMove()/onSpace() the keyboard does. ---- */
+const DIRS = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0] };
+
+function bindDirButton(el){
+  const [dx, dy] = DIRS[el.dataset.dir];
+  let holdTimer = null, repeatTimer = null;
+  const step = ()=>{ if(gameStarted) tryMove(dx, dy); };
+  const start = (e)=>{
+    e.preventDefault();
+    step();
+    // long initial delay so a deliberate single tap never double-steps
+    holdTimer = setTimeout(()=>{ repeatTimer = setInterval(step, 200); }, 420);
+  };
+  const stop = ()=>{
+    clearTimeout(holdTimer); clearInterval(repeatTimer);
+    holdTimer = repeatTimer = null;
+  };
+  el.addEventListener('pointerdown', start);
+  ['pointerup','pointerleave','pointercancel'].forEach(ev=> el.addEventListener(ev, stop));
+}
+document.querySelectorAll('.dbtn').forEach(bindDirButton);
+
+$('btnAction').addEventListener('pointerdown', e=>{
+  e.preventDefault();
+  if(gameStarted) onSpace();
+});
+
+// tapping the dialog (or the board while a dialog is up) advances it
+$('dialogBox').addEventListener('pointerdown', e=>{ e.preventDefault(); if(gameStarted) onSpace(); });
+canvas.addEventListener('pointerdown', e=>{
+  if(gameStarted && dialogOpen){ e.preventDefault(); onSpace(); }
+});
+
+// The C cheat key can't be reached on a tablet, so give teachers a hidden
+// long-press on the title instead (students won't stumble onto it).
+(function bindLongPressCheat(){
+  const title = $('gameTitle');
+  let t = null;
+  const start = ()=>{ t = setTimeout(()=>{ if(gameStarted) cheat(); }, 1200); };
+  const stop  = ()=>{ clearTimeout(t); t = null; };
+  title.addEventListener('pointerdown', start);
+  ['pointerup','pointerleave','pointercancel'].forEach(ev=> title.addEventListener(ev, stop));
+})();
+
 /* =====================================================================
    8. RENDERING
 ===================================================================== */
@@ -585,6 +694,20 @@ function drawEmoji(ch, cx, cy, size){
   ctx.textBaseline = 'middle';
   ctx.fillText(ch, cx, cy);
 }
+
+// Keep the backing store matched to the on-screen size (and DPR) while the
+// drawing code keeps working in fixed 480x480 board units.
+function resizeCanvas(){
+  const rect = canvas.getBoundingClientRect();
+  if(!rect.width) return;
+  const dpr = window.devicePixelRatio || 1;
+  const px = Math.max(1, Math.round(rect.width * dpr));
+  if(canvas.width !== px){ canvas.width = px; canvas.height = px; }
+  const s = px / (COLS * TILE);
+  ctx.setTransform(s, 0, 0, s, 0, 0);
+}
+if(window.ResizeObserver){ new ResizeObserver(resizeCanvas).observe(canvas); }
+window.addEventListener('orientationchange', ()=> setTimeout(resizeCanvas, 150));
 
 function render(){
   const map = maps[currentMap];
@@ -640,7 +763,8 @@ $('startBtn').addEventListener('click', ()=>{
 
 $('bgmBtn').addEventListener('click', ()=>{
   const on = audio.toggleBGM();
-  $('bgmBtn').textContent = on ? '🎵 音樂 ON' : '🔇 音樂 OFF';
+  $('bgmBtn').textContent = on ? '🎵' : '🔇';
+  $('bgmBtn').title = on ? '音樂開' : '音樂關';
 });
 
 $('restartBtn').addEventListener('click', ()=>{
@@ -649,6 +773,7 @@ $('restartBtn').addEventListener('click', ()=>{
 });
 
 resetWorld();
+resizeCanvas();
 requestAnimationFrame(loop);
 
 })();
