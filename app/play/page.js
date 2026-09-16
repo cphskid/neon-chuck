@@ -83,6 +83,16 @@ export default function PlayPage() {
   const timerRef = useRef(null)
   const prevLevelRef = useRef(1)
 
+  function speakWord(text) {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return
+    window.speechSynthesis.cancel()
+    const utter = new SpeechSynthesisUtterance(text)
+    utter.lang = 'en-US'
+    utter.rate = 0.85
+    // Chrome silently drops speak() if it's called right after cancel(); a tiny delay avoids that.
+    setTimeout(() => window.speechSynthesis.speak(utter), 50)
+  }
+
   useEffect(() => {
     try {
       setBestScore(Number(localStorage.getItem('nc_best_score') || 0))
@@ -100,12 +110,8 @@ export default function PlayPage() {
     const tier = MONSTER_TIERS[Math.min(Math.floor((state.level - 1) / 3), 2)]
     setMonsterEmoji(tier[Math.floor(Math.random() * tier.length)])
 
-    if (q.type === 'listening' && typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel()
-      const utter = new SpeechSynthesisUtterance(q.speak)
-      utter.lang = 'en-US'
-      utter.rate = 0.85
-      window.speechSynthesis.speak(utter)
+    if (q.type === 'listening') {
+      speakWord(q.speak)
     }
 
     const start = Date.now()
@@ -231,6 +237,14 @@ export default function PlayPage() {
         .question-card { text-align: center; margin-bottom: 16px; }
         .question-title { font-size: 1.1rem; font-weight: 700; color: #2d3748; margin-bottom: 8px; }
         .question-emoji { font-size: 3.5rem; }
+        .speak-btn {
+          border: none; cursor: pointer; border-radius: 999px;
+          font-family: 'Baloo 2', sans-serif; font-weight: 800; font-size: 1.05rem; color: #fff;
+          background: linear-gradient(180deg, #63b3ed, #4299e1);
+          padding: 12px 26px; box-shadow: 0 5px 0 #2b6cb0;
+          transition: transform 0.08s;
+        }
+        .speak-btn:active { transform: translateY(3px); box-shadow: 0 2px 0 #2b6cb0; }
 
         .options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .option-btn {
@@ -305,7 +319,13 @@ export default function PlayPage() {
 
               <div className="question-card">
                 <div className="question-title">{question.title}</div>
-                {question.promptEmoji && <div className="question-emoji">{question.promptEmoji}</div>}
+                {question.type === 'listening' ? (
+                  <button type="button" className="speak-btn" onClick={() => speakWord(question.speak)}>
+                    🔊 再聽一次
+                  </button>
+                ) : (
+                  question.promptEmoji && <div className="question-emoji">{question.promptEmoji}</div>
+                )}
               </div>
 
               <div className="options">
