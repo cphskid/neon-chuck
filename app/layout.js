@@ -1,6 +1,6 @@
 export const metadata = {
-  title: 'Neon Chuck',
-  description: 'Hello World from Chuck — powered by Turso',
+  title: '兒童英文遊戲平台',
+  description: '英文防禦戰 — 字母、單字、填空、聽力練習小遊戲',
 }
 
 export default function RootLayout({ children }) {
