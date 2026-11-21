@@ -1,0 +1,1627 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>星夜騎行</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0b1430;color:#f3d98a;font-family:"Noto Serif TC","PingFang TC","Microsoft JhengHei",serif;}
+  canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab;}
+  canvas#c:active{cursor:grabbing}
+  #hud{position:fixed;left:12px;top:12px;padding:10px 12px;background:rgba(10,20,52,.62);border:1px solid rgba(243,217,138,.35);border-radius:10px;font-size:13px;line-height:1.5;max-width:260px;user-select:none;backdrop-filter:blur(3px)}
+  #hud h1{margin:0 0 4px;font-size:16px;letter-spacing:.12em;color:#ffd977}
+  #hud .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  #hud button{font:inherit;font-size:12px;color:#ffe6a6;background:rgba(40,70,140,.55);border:1px solid rgba(243,217,138,.45);border-radius:6px;padding:4px 8px;cursor:pointer}
+  #hud button.on{background:rgba(214,150,40,.55);color:#fff4d0}
+  #stats{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#b9c9ee;white-space:pre}
+  #help{display:none;margin-top:6px;font-size:12px;color:#dfe6ff}
+  #loading{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0b1430;z-index:10;font-size:18px;letter-spacing:.2em}
+  #loading small{margin-top:10px;font-size:12px;color:#9fb0dd;letter-spacing:.05em}
+  #joy{position:fixed;left:22px;bottom:22px;width:132px;height:132px;border-radius:50%;background:rgba(20,40,90,.35);border:2px solid rgba(243,217,138,.45);display:none;touch-action:none;z-index:5}
+  #knob{position:absolute;left:41px;top:41px;width:50px;height:50px;border-radius:50%;background:rgba(243,217,138,.6);box-shadow:0 0 12px rgba(255,200,90,.6)}
+  #jumpBtn{position:fixed;right:26px;bottom:34px;width:88px;height:88px;border-radius:50%;font:inherit;font-size:22px;color:#fff3c8;background:rgba(200,130,40,.5);border:2px solid rgba(255,225,150,.7);display:none;touch-action:none;z-index:5}
+  body.touch #joy,body.touch #jumpBtn{display:block}
+  body.touch #hud{font-size:11px;max-width:200px;padding:6px 8px;left:8px;top:8px}
+  body.touch #hud h1{font-size:13px}
+  body.touch #hud button{font-size:11px;padding:3px 6px}
+  body.touch #stats{font-size:10px}
+  body.tour #joy,body.tour #jumpBtn{opacity:.25}
+  #err{position:fixed;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:24px;background:#0b1430;z-index:20}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <h1>星夜騎行</h1>
+  <div id="stats">載入中…</div>
+  <div class="row">
+    <button id="bAuto" class="on" title="P">自動騎行</button>
+    <button id="bTour" title="T">全景巡遊</button>
+    <button id="bHelp">操作說明</button>
+  </div>
+  <div id="help"></div>
+</div>
+<div id="joy"><div id="knob"></div></div>
+<button id="jumpBtn">跳</button>
+<div id="loading">調 色 中<small id="loadMsg">準備畫布…</small></div>
+<div id="err"></div>
+
+<script type="module">
+// =====================================================================
+//  星夜騎行 — the whole frame is painted with instanced oil-paint strokes.
+//  Every stroke is a quad fixed in 3D (position + tangent + normal),
+//  shaded per stroke with a bright/dark pigment pair and painted in the
+//  fragment shader with a fixed number of bristles and impasto lighting.
+// =====================================================================
+const RAPIER_URLS = [
+  'https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier.es.js',
+  'https://esm.sh/@dimforge/rapier3d-compat@0.14.0',
+];
+const params = new URLSearchParams(location.search);
+const IS_TOUCH = matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window && navigator.maxTouchPoints > 0);
+if (IS_TOUCH) document.body.classList.add('touch');
+const Q = params.has('q') ? Math.max(0.05, +params.get('q')) : (IS_TOUCH ? 0.45 : 1.0);   // stroke density
+const FIXED_RES = params.has('fixedres');
+const $ = id => document.getElementById(id);
+const loadMsg = t => { $('loadMsg').textContent = t; };
+const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
+
+// ---------------------------------------------------------------- math
+const clamp = (x, a, b) => x < a ? a : x > b ? b : x;
+const lerp = (a, b, t) => a + (b - a) * t;
+function sstep(a, b, x) { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+function mulberry(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+let rnd = mulberry(20261120);
+const rr = (a, b) => a + (b - a) * rnd();
+const v3 = (x, y, z) => [x, y, z];
+const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const scl = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const len = a => Math.hypot(a[0], a[1], a[2]);
+const norm = a => { const l = len(a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+function onPlane(t, n) { let p = sub(t, scl(n, dot(t, n))); if (len(p) < 1e-4) p = cross(n, Math.abs(n[1]) < .9 ? [0, 1, 0] : [1, 0, 0]); return norm(p); }
+function dirAE(azDeg, elDeg) { const a = azDeg * Math.PI / 180, e = elDeg * Math.PI / 180; return [Math.cos(a) * Math.cos(e), Math.sin(e), Math.sin(a) * Math.cos(e)]; }
+
+const M4 = {
+  id() { const m = new Float32Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; },
+  mul(a, b) { const o = new Float32Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3]; return o; },
+  T(x, y, z) { const m = M4.id(); m[12] = x; m[13] = y; m[14] = z; return m; },
+  Rx(a) { const m = M4.id(), c = Math.cos(a), s = Math.sin(a); m[5] = c; m[6] = s; m[9] = -s; m[10] = c; return m; },
+  Ry(a) { const m = M4.id(), c = Math.cos(a), s = Math.sin(a); m[0] = c; m[2] = -s; m[8] = s; m[10] = c; return m; },
+  Rz(a) { const m = M4.id(), c = Math.cos(a), s = Math.sin(a); m[0] = c; m[1] = s; m[4] = -s; m[5] = c; return m; },
+  chain(...ms) { return ms.reduce((a, b) => M4.mul(a, b)); },
+  persp(fovy, asp, n, f) { const t = 1 / Math.tan(fovy / 2), m = new Float32Array(16); m[0] = t / asp; m[5] = t; m[10] = (f + n) / (n - f); m[11] = -1; m[14] = 2 * f * n / (n - f); return m; },
+  lookAt(e, c, up) { const z = norm(sub(e, c)), x = norm(cross(up, z)), y = cross(z, x); const m = M4.id(); m[0] = x[0]; m[4] = x[1]; m[8] = x[2]; m[1] = y[0]; m[5] = y[1]; m[9] = y[2]; m[2] = z[0]; m[6] = z[1]; m[10] = z[2]; m[12] = -dot(x, e); m[13] = -dot(y, e); m[14] = -dot(z, e); return m; },
+  apply(m, p) { return [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13], m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]]; },
+};
+// Ry convention: (0,0,1) -> (sin a, 0, cos a)
+
+// ------------------------------------------------- terrain (JS == GLSL)
+function hash2(ix, iz) { let h = (Math.imul(ix | 0, 374761393) + Math.imul(iz | 0, 668265263)) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16; return (h & 0xffffff) / 16777216; }
+function vnoise(x, z) { const ix = Math.floor(x), iz = Math.floor(z), fx = x - ix, fz = z - iz; const ux = fx * fx * (3 - 2 * fx), uz = fz * fz * (3 - 2 * fz); const a = hash2(ix, iz), b = hash2(ix + 1, iz), c = hash2(ix, iz + 1), d = hash2(ix + 1, iz + 1); return a + (b - a) * ux + (c - a) * uz + (a - b - c + d) * ux * uz; }
+const RING_R = 70;
+const VC = [-170, 160];               // village centre
+const WM = [150, -35];                // windmill
+const CLIFF_X = -229;
+function riverZ(x) { return -150 + 18 * Math.sin(x / 70) + 6 * Math.sin(x / 23 + 1.0); }
+function riverDZ(x) { return 18 / 70 * Math.cos(x / 70) + 6 / 23 * Math.cos(x / 23 + 1.0); }
+function hills(x, z) {
+  let h = (vnoise(x * 0.006 + 3.1, z * 0.006 + 7.7) - 0.5) * 18 + (vnoise(x * 0.021 + 1.3, z * 0.021 + 9.2) - 0.5) * 5 + (vnoise(x * 0.08, z * 0.08) - 0.5) * 0.9;
+  const r = Math.hypot(x, z);
+  h *= 1 - 0.7 * sstep(130, 60, r);
+  h += 22 * sstep(-226, -232, x);
+  return h;
+}
+function H(x, z) {
+  let h = hills(x, z);
+  const d = Math.abs(z - riverZ(x));
+  if (d < 30) { const bank = hills(x, riverZ(x)); h = h + (bank - h) * sstep(30, 12, d) - 2.6 * sstep(9, 3, d); }
+  return h;
+}
+const waterLevel = x => hills(x, riverZ(x)) - 0.9;
+function terrainNormal(x, z) { const e = 0.5; return norm([-(H(x + e, z) - H(x - e, z)) / (2 * e), 1, -(H(x, z + e) - H(x, z - e)) / (2 * e)]); }
+const ROADS = [ // segments [x0,z0,x1,z1]
+  [0, -RING_R, 0, -330],
+  [-49.5, 49.5, -95, 92], [-95, 92, -170, 150],
+  [RING_R, 0, 112, -14], [112, -14, 142, -30],
+];
+function segDist(x, z, s) { const dx = s[2] - s[0], dz = s[3] - s[1]; const t = clamp(((x - s[0]) * dx + (z - s[1]) * dz) / (dx * dx + dz * dz), 0, 1); return Math.hypot(x - s[0] - dx * t, z - s[1] - dz * t); }
+function roadDist(x, z) { let d = 1e9, best = null; for (const s of ROADS) { const q = segDist(x, z, s); if (q < d) { d = q; best = s; } } return [d, best]; }
+const WHEAT = [[95, 230, 30, 180], [-140, -70, -125, -72]];
+const inRect = (x, z, r) => x > r[0] && x < r[1] && z > r[2] && z < r[3];
+const BRIDGE_Z = riverZ(0);
+const BRIDGE_BANK = hills(0, BRIDGE_Z);
+function deckY(z) { const u = (z - BRIDGE_Z) / 11; return Math.abs(u) > 1 ? -1e9 : BRIDGE_BANK + 0.05 + 2.8 * (1 - u * u); }
+
+// ---------------------------------------------------------- palettes
+const P = (b, d) => ({ b, d });
+const PAL = {
+  meadow: P([0.42, 0.6, 0.3], [0.07, 0.16, 0.13]), meadow2: P([0.58, 0.64, 0.3], [0.1, 0.18, 0.1]),
+  path: P([0.74, 0.62, 0.42], [0.27, 0.22, 0.2]), soil: P([0.34, 0.44, 0.2], [0.07, 0.11, 0.07]),
+  wheatG: P([0.93, 0.77, 0.32], [0.38, 0.28, 0.11]), bank: P([0.48, 0.42, 0.3], [0.13, 0.12, 0.14]),
+  rock: P([0.64, 0.6, 0.56], [0.15, 0.15, 0.22]), rock2: P([0.5, 0.52, 0.58], [0.1, 0.11, 0.18]), village: P([0.72, 0.63, 0.47], [0.24, 0.21, 0.21]),
+  wood: P([0.62, 0.43, 0.25], [0.18, 0.11, 0.07]), stone: P([0.7, 0.67, 0.6], [0.2, 0.2, 0.26]),
+  plaster: P([0.9, 0.84, 0.64], [0.28, 0.28, 0.36]), plaster2: P([0.66, 0.74, 0.82], [0.17, 0.2, 0.3]), plaster3: P([0.88, 0.7, 0.5], [0.3, 0.22, 0.24]),
+  roofBlue: P([0.36, 0.44, 0.62], [0.06, 0.08, 0.15]), roofRed: P([0.78, 0.42, 0.24], [0.24, 0.11, 0.1]), roofDark: P([0.3, 0.3, 0.4], [0.05, 0.05, 0.09]),
+  window: P([1.0, 0.82, 0.38], [0.95, 0.55, 0.16]), door: P([0.42, 0.26, 0.15], [0.1, 0.06, 0.05]),
+  cypress: P([0.22, 0.4, 0.3], [0.02, 0.06, 0.05]), cypress2: P([0.27, 0.45, 0.5], [0.03, 0.07, 0.09]),
+  olive: P([0.48, 0.58, 0.42], [0.07, 0.13, 0.11]), trunk: P([0.4, 0.3, 0.22], [0.08, 0.06, 0.06]),
+  stem: P([0.36, 0.56, 0.25], [0.07, 0.14, 0.07]), leaf: P([0.3, 0.52, 0.22], [0.05, 0.11, 0.06]),
+  petal: P([1.0, 0.82, 0.22], [0.78, 0.46, 0.08]), seedC: P([0.46, 0.26, 0.08], [0.11, 0.05, 0.03]),
+  wheat: P([0.96, 0.8, 0.36], [0.42, 0.31, 0.12]), wheat2: P([0.99, 0.88, 0.5], [0.5, 0.38, 0.15]),
+  water: P([0.35, 0.55, 0.75], [0.05, 0.1, 0.24]), fall: P([0.85, 0.92, 1.0], [0.3, 0.42, 0.6]),
+  horse: P([0.62, 0.36, 0.19], [0.2, 0.1, 0.06]), horseDark: P([0.25, 0.15, 0.1], [0.06, 0.04, 0.03]),
+  saddle: P([0.5, 0.22, 0.14], [0.13, 0.05, 0.04]), blanket: P([0.75, 0.2, 0.15], [0.25, 0.05, 0.06]),
+  cape: P([0.26, 0.46, 1.0], [0.08, 0.15, 0.45]), tunic: P([0.35, 0.5, 0.82], [0.07, 0.1, 0.25]),
+  skin: P([0.92, 0.7, 0.52], [0.35, 0.22, 0.18]), hat: P([0.32, 0.26, 0.36], [0.06, 0.05, 0.08]),
+  boot: P([0.3, 0.2, 0.14], [0.06, 0.04, 0.03]), lantern: P([1.0, 0.86, 0.45], [1.0, 0.6, 0.2]), metal: P([0.4, 0.38, 0.35], [0.08, 0.08, 0.1]),
+};
+
+// --------------------------------------------------- stroke buffers
+// layout (36 bytes): pos f32x3 | half-size f32x2 (w,l) | tangent i8x4 (w=sway) | normal i8x4 (w=ao) | bright u8x4 (a=seed) | dark u8x4 (a=material)
+const STRIDE = 36;
+const MAT = { STD: 0, SWAY: 1, EMIT: 2, WATER: 3, MIRROR: 4, CLOTH: 5, FALL: 6, FOLIAGE: 7, SKYFLOW: 10, SKYFIX: 11, SKYEMIT: 12 };
+class StrokeSet {
+  constructor(cap = 1024) { this.n = 0; this.alloc(cap); }
+  alloc(cap) { const old = this.u8c; this.cap = cap; this.buf = new ArrayBuffer(cap * STRIDE); this.f = new Float32Array(this.buf); this.i8 = new Int8Array(this.buf); this.u8c = new Uint8ClampedArray(this.buf); if (old) this.u8c.set(old.subarray(0, this.n * STRIDE)); }
+  push(p, t, n, hw, hl, pal, mat = 0, tw = 0, ao = 1, jit = 0.06) {
+    if (this.n >= this.cap) this.alloc(this.cap * 2);
+    const i = this.n++, f = i * 9, b = i * STRIDE;
+    this.f[f] = p[0]; this.f[f + 1] = p[1]; this.f[f + 2] = p[2]; this.f[f + 3] = hw; this.f[f + 4] = hl;
+    const i8 = this.i8, u = this.u8c;
+    i8[b + 20] = Math.round(t[0] * 127); i8[b + 21] = Math.round(t[1] * 127); i8[b + 22] = Math.round(t[2] * 127); i8[b + 23] = Math.round(clamp(tw, -1, 1) * 127);
+    i8[b + 24] = Math.round(n[0] * 127); i8[b + 25] = Math.round(n[1] * 127); i8[b + 26] = Math.round(n[2] * 127); i8[b + 27] = Math.round(clamp(ao, 0, 1) * 127);
+    const k = 1 + (rnd() - 0.5) * jit * 2;
+    u[b + 28] = pal.b[0] * k * 255; u[b + 29] = pal.b[1] * k * 255; u[b + 30] = pal.b[2] * k * 255; u[b + 31] = rnd() * 255;
+    u[b + 32] = pal.d[0] * k * 255; u[b + 33] = pal.d[1] * k * 255; u[b + 34] = pal.d[2] * k * 255; u[b + 35] = mat;
+  }
+}
+// World sets are chunked (40 m cells), shuffled inside each cell so that drawing the first N
+// instances of a chunk is an unbiased thinning — that is how distant chunks get fewer strokes.
+const CELL = 40;
+class ChunkedSet extends StrokeSet {
+  finalize() {
+    const n = this.n, f = this.f, keyOf = new Int32Array(n), counts = new Int32Array(4096);
+    for (let i = 0; i < n; i++) { const cx = clamp(Math.floor(f[i * 9] / CELL) + 32, 0, 63), cz = clamp(Math.floor(f[i * 9 + 2] / CELL) + 32, 0, 63); const k = cx * 64 + cz; keyOf[i] = k; counts[k]++; }
+    const start = new Int32Array(4097); for (let k = 0; k < 4096; k++) start[k + 1] = start[k] + counts[k];
+    const fill = start.slice(0, 4096), perm = new Uint32Array(n);
+    for (let i = 0; i < n; i++) perm[fill[keyOf[i]]++] = i;
+    const src = new Uint32Array(this.buf, 0, n * 9), out = new ArrayBuffer(n * STRIDE), dst = new Uint32Array(out);
+    const r = mulberry(7);
+    this.chunks = [];
+    for (let k = 0; k < 4096; k++) {
+      const s = start[k], c = counts[k]; if (!c) continue;
+      for (let j = c - 1; j > 0; j--) { const q = Math.floor(r() * (j + 1)); const t = perm[s + j]; perm[s + j] = perm[s + q]; perm[s + q] = t; }
+      const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9]; let maxL = 0;
+      for (let j = 0; j < c; j++) {
+        const i = perm[s + j], o = (s + j) * 9, si = i * 9;
+        for (let w = 0; w < 9; w++) dst[o + w] = src[si + w];
+        for (let a = 0; a < 3; a++) { const v = f[si + a]; if (v < mn[a]) mn[a] = v; if (v > mx[a]) mx[a] = v; }
+        if (f[si + 4] > maxL) maxL = f[si + 4];
+      }
+      this.chunks.push({ start: s, count: c, mn, mx, maxL });
+    }
+    this.buf = out; this.cap = n;
+  }
+}
+
+// ---------------------------------------------------------------- GL
+const canvas = $('c');
+const gl = canvas.getContext('webgl2', { antialias: !IS_TOUCH, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: params.has('shot') });
+if (!gl) { $('err').style.display = 'flex'; $('err').textContent = '此瀏覽器不支援 WebGL2，無法繪製。'; $('loading').style.display = 'none'; throw new Error('no webgl2'); }
+const HAS_AA = !!gl.getContextAttributes().antialias && gl.getParameter(gl.SAMPLES) > 0;
+
+const GLSL_COMMON = `#version 300 es
+precision highp float; precision highp int;
+uniform mat4 uVP; uniform vec3 uCam; uniform float uTime; uniform vec2 uRes; uniform float uProjY;
+uniform float uPxMin, uPxMax, uPxLod;
+uniform vec3 uMoonDir, uMoonTint, uFogCol, uMoonSky; uniform float uFogD;
+uniform vec4 uLP[8]; uniform vec4 uLC[8];
+uniform vec4 uVort[6]; uniform float uVortS[6];
+float h11(float n){ return fract(sin(n*12.9898+4.1414)*43758.5453); }
+float sstep(float a,float b,float x){ float t=clamp((x-a)/(b-a),0.0,1.0); return t*t*(3.0-2.0*t); }
+float hashI(int ix,int iz){ uint h=uint(ix)*374761393u+uint(iz)*668265263u; h=(h^(h>>13u))*1274126177u; h^=h>>16u; return float(h&0xffffffu)/16777216.0; }
+float vnoise(vec2 p){ vec2 i=floor(p); vec2 f=p-i; vec2 u=f*f*(3.0-2.0*f); int ix=int(i.x), iz=int(i.y);
+  float a=hashI(ix,iz), b=hashI(ix+1,iz), c=hashI(ix,iz+1), d=hashI(ix+1,iz+1); return a+(b-a)*u.x+(c-a)*u.y+(a-b-c+d)*u.x*u.y; }
+float riverZ(float x){ return -150.0+18.0*sin(x/70.0)+6.0*sin(x/23.0+1.0); }
+float hills(float x,float z){
+  float h=(vnoise(vec2(x*0.006+3.1,z*0.006+7.7))-0.5)*18.0+(vnoise(vec2(x*0.021+1.3,z*0.021+9.2))-0.5)*5.0+(vnoise(vec2(x*0.08,z*0.08))-0.5)*0.9;
+  float r=length(vec2(x,z)); h*=1.0-0.7*sstep(130.0,60.0,r); h+=22.0*sstep(-226.0,-232.0,x); return h; }
+float terrainH(float x,float z){ float h=hills(x,z); float rz=riverZ(x); float d=abs(z-rz);
+  if(d<30.0){ float bank=hills(x,rz); h=h+(bank-h)*sstep(30.0,12.0,d)-2.6*sstep(9.0,3.0,d); } return h; }
+vec3 shade(vec3 P, vec3 N, vec3 bright, vec3 dark, float seed, int m, float ao){
+  float nd=dot(N,uMoonDir);
+  bool thin = (m==1||m==7);
+  float dif = thin ? 0.5+0.5*nd : max(nd,0.0)*0.85+0.15;
+  float j=(h11(seed*17.3)-0.5)*0.4;
+  float t=sstep(0.25,0.8,dif*ao+j);
+  vec3 base=mix(dark,bright,t);
+  base*=1.0+(vec3(h11(seed*3.1),h11(seed*5.7),h11(seed*9.3))-0.5)*0.18;
+  float lum=dot(base,vec3(0.3,0.59,0.11));
+  vec3 moonC=mix(vec3(lum),base,0.5)*uMoonTint*(0.6+0.55*dif);
+  vec3 warm=vec3(0.0);
+  for(int i=0;i<8;i++){ vec3 L=uLP[i].xyz-P; float d2=dot(L,L); float r=uLP[i].w;
+    if(d2<r*r){ float d=sqrt(d2); float att=1.0-d/r; att*=att; float ndl= thin?0.75:max(dot(N,L/max(d,1e-3))*0.7+0.3,0.0); warm+=uLC[i].rgb*uLC[i].a*att*ndl; } }
+  float wa=clamp(max(warm.r,max(warm.g,warm.b)),0.0,1.0);
+  return moonC*(1.0-0.55*wa)+bright*warm*1.1;
+}
+vec3 skyCol(vec3 d){
+  float e=clamp(d.y,0.0,1.0);
+  vec3 c=mix(vec3(0.2,0.4,0.58),vec3(0.06,0.1,0.32),pow(e,0.6));
+  float sw=0.0;
+  for(int i=0;i<6;i++){ vec3 cv=uVort[i].xyz; float a=acos(clamp(dot(d,cv),-1.0,1.0)); float r=uVort[i].w; float f=exp(-a*a/(r*r));
+    vec3 e1=normalize(cross(cv,vec3(0.0,1.0,0.0))); vec3 e2=cross(e1,cv); float th=atan(dot(d,e2),dot(d,e1));
+    sw+=f*(0.5+0.5*sin(th*2.0+a/r*9.0-uTime*0.1)); }
+  c=mix(c,vec3(0.55,0.72,0.85),clamp(sw,0.0,1.0)*0.45);
+  float mm=acos(clamp(dot(d,uMoonSky),-1.0,1.0));
+  c+=vec3(1.0,0.78,0.35)*(exp(-mm*mm/0.004)*1.6+exp(-mm*mm/0.07)*0.3);
+  return c;
+}
+vec3 fogit(vec3 c, float dist, float k){ return mix(c,uFogCol,(1.0-exp(-dist*uFogD))*k); }
+in vec2 aCorner;
+out vec2 vUv; out vec3 vCol; out float vSeed; out vec2 vL2; out float vAm;
+void emitStroke(vec3 C, vec3 T, vec3 N, float hw, float hl, float seed, vec3 col, float am){
+  vec3 B=normalize(cross(N,T));
+  vec3 Pp=C+T*(aCorner.x*hl)+B*(aCorner.y*hw);
+  // depth separation that grows with distance: a homothety about the eye changes depth only,
+  // so screen position is untouched but overlapping strokes keep a stable front-to-back order.
+  Pp=uCam+(Pp-uCam)*(1.0-seed*0.006);
+  gl_Position=uVP*vec4(Pp,1.0);
+  vec4 c0=uVP*vec4(C,1.0); vec4 cT=uVP*vec4(C+T,1.0); vec4 cB=uVP*vec4(C+B,1.0);
+  vec2 L2=normalize(vec2(-0.55,0.83));
+  if(c0.w>0.05 && cT.w>0.05 && cB.w>0.05){
+    vec2 s0=c0.xy/c0.w; vec2 sT=(cT.xy/cT.w-s0)*uRes; vec2 sB=(cB.xy/cB.w-s0)*uRes;
+    sT/=max(length(sT),1e-5); sB/=max(length(sB),1e-5);
+    vL2=vec2(dot(sT,L2),dot(sB,L2));
+  } else vL2=vec2(0.0,0.7);
+  vUv=aCorner; vCol=col; vSeed=seed; vAm=am;
+}
+`;
+
+const VS_WORLD = GLSL_COMMON + `
+layout(location=0) in vec3 aPos; layout(location=1) in vec2 aSize; layout(location=2) in vec4 aTan; layout(location=3) in vec4 aNrm;
+layout(location=4) in vec4 aBright; layout(location=5) in vec4 aDark;
+uniform mat4 uModel; uniform float uRankDiv; uniform float uSpeedF;
+vec3 waterCol(vec3 P, vec3 brightC, vec3 darkC, float seed){
+  vec3 V=normalize(P-uCam);
+  vec3 n=normalize(vec3(sin(P.x*0.7+uTime)*0.04+(h11(seed*5.0)-0.5)*0.14,1.0,cos(P.z*0.9+uTime*1.3)*0.04+(h11(seed*9.0)-0.5)*0.14));
+  vec3 R=reflect(V,n); R.y=abs(R.y);
+  vec3 sky=skyCol(R);
+  float fres=0.3+0.7*pow(1.0-max(dot(-V,n),0.0),3.0);
+  vec3 c=mix(darkC*0.7,sky,fres);
+  for(int i=0;i<8;i++){ vec3 Ld=uLP[i].xyz-P; float dl=length(Ld); float al=max(dot(R,Ld/max(dl,1e-3)),0.0);
+    c+=uLC[i].rgb*uLC[i].a*pow(al,40.0)*1.6*(1.0-sstep(0.0,140.0,dl)); }
+  return mix(c,brightC*0.7,0.12);
+}
+void main(){
+  int m=int(aDark.a*255.0+0.5);
+  float seed=aBright.a;
+  vec3 lp=aPos; vec3 T=aTan.xyz; vec3 N=aNrm.xyz; float tw=aTan.w;
+  float hw=aSize.x, hl=aSize.y, sc=1.0;
+  if(m==5){ lp.z-=tw*uSpeedF*0.3; lp+=N*sin(uTime*7.0+lp.y*4.0+lp.x*3.0)*0.05*tw*(0.3+uSpeedF); }
+  vec3 P=(uModel*vec4(lp,1.0)).xyz; mat3 R=mat3(uModel); T=normalize(R*T); N=normalize(R*N);
+  if(m==1||m==7){ float ph=uTime*1.4+P.x*0.09+P.z*0.07; vec2 w=vec2(0.8,0.45)*(sin(ph)*0.6+sin(ph*2.3+P.x*0.3)*0.25); P.xz+=w*tw*(m==1?0.22:0.3); }
+  if(m==3||m==6){ float sp=(m==3)?0.07:0.8; float ph=fract(uTime*sp*(0.8+0.4*h11(seed*7.0))+seed); P+=T*(ph-0.5)*hl*((m==3)?3.0:7.0); sc*=sqrt(max(sin(ph*3.14159),0.0)); }
+  if(m==4){ P.x+=sin(uTime*1.7+P.y*1.3+P.z*0.4)*0.12; }
+  float dist=length(P-uCam);
+  float ppm=uRes.y*0.5*uProjY/max(dist,0.05);
+  float natPx=hl*2.0*ppm;
+  float keep=1.0;
+  if(uRankDiv>0.0){
+    keep=clamp(natPx*natPx/(uPxLod*uPxLod),0.0,1.0);
+    float r=(float(gl_InstanceID)+0.5)*uRankDiv;
+    sc*=clamp((keep-r)/(0.25*keep+1e-6),0.0,1.0);      // shrink smoothly before vanishing
+  }
+  float comp=inversesqrt(max(keep,1e-4));                 // survivors grow to keep coverage
+  float px=natPx*comp;
+  sc*=comp*clamp(px,uPxMin,uPxMax)/max(px,1e-5);          // on-screen size limits
+  if(sc<1e-3){ gl_Position=vec4(2.0,2.0,2.0,1.0); return; }
+  P+=N*0.03;
+  vec3 col;
+  if(m==2){ col=aBright.rgb*(1.2+0.12*sin(uTime*3.0+seed*20.0)); col=fogit(col,dist,0.5); }
+  else if(m==3){ col=fogit(waterCol(P,aBright.rgb,aDark.rgb,seed),dist,0.9); }
+  else { col=shade(P,N,aBright.rgb,aDark.rgb,seed,m,aNrm.w);
+    if(m==4) col*=vec3(0.5,0.58,0.78);
+    if(m==6) col=mix(col,aBright.rgb*0.75,0.45);
+    col=fogit(col,dist,0.88); }
+  emitStroke(P,T,N,hw*sc,hl*sc,seed,col,1.0);
+}`;
+
+const VS_SKY = GLSL_COMMON + `
+layout(location=0) in vec3 aPos; layout(location=1) in vec2 aSize; layout(location=2) in vec4 aTan; layout(location=3) in vec4 aNrm;
+layout(location=4) in vec4 aBright; layout(location=5) in vec4 aDark;
+uniform float uSkyPxMax;
+vec3 flowAt(vec3 d){
+  vec3 east=cross(vec3(0.0,1.0,0.0),d); float el=length(east); east= el>1e-4 ? east/el : vec3(1.0,0.0,0.0);
+  vec3 north=cross(d,east); float az=atan(d.z,d.x);
+  vec3 v=east*(0.5+0.3*sin(d.y*8.0+az*3.0+uTime*0.02))+north*(0.3*sin(az*5.0+d.y*7.0));
+  for(int i=0;i<6;i++){ vec3 c=uVort[i].xyz; float r=uVort[i].w; float cd=dot(d,c); float a=acos(clamp(cd,-1.0,1.0));
+    float f=exp(-a*a/(r*r))*2.5*uVortS[i]; vec3 tg=cross(c,d); float tl=length(tg);
+    if(tl>1e-4) v+=tg/tl*f; v+=(c-d*cd)*abs(f)*0.6; }
+  return v;
+}
+void main(){
+  int m=int(aDark.a*255.0+0.5); float seed=aBright.a;
+  vec3 d=normalize(aPos); vec3 T=aTan.xyz; float sc=1.0; float hl=aSize.y, hw=aSize.x;
+  if(m==10){
+    vec3 v=flowAt(d); v-=d*dot(v,d); float vl=length(v); if(vl>1e-4) T=v/vl;
+    float ph=fract(uTime*0.03*(0.7+0.6*h11(seed*3.3))+seed);
+    d=normalize(d+T*(ph-0.5)*hl*4.0);
+    v=flowAt(d); v-=d*dot(v,d); vl=length(v); if(vl>1e-4) T=v/vl;
+    sc=sqrt(max(sin(ph*3.14159),0.0));
+  } else { T=normalize(T-d*dot(T,d)); }
+  float ppr=uRes.y*0.5*uProjY;
+  float px=hl*2.0*ppr;
+  sc*=clamp(px,uPxMin,uSkyPxMax)/px;
+  vec3 col=mix(aDark.rgb,aBright.rgb,h11(seed*11.0));
+  if(m==12) col*=1.05+0.18*sin(uTime*2.2+seed*40.0);
+  float R=1500.0;
+  emitStroke(uCam+d*R,T,-d,hw*sc*R,hl*sc*R,seed,col,1.0);
+  gl_Position.z=gl_Position.w*0.99999;
+}`;
+
+const VS_GRASS = GLSL_COMMON + `
+uniform vec3 uGC; uniform float uGS; uniform int uGSide; uniform float uGR;
+float segD(vec2 p, vec4 s){ vec2 a=s.xy, b=s.zw; vec2 ab=b-a; float t=clamp(dot(p-a,ab)/dot(ab,ab),0.0,1.0); return length(p-a-ab*t); }
+float grassMask(float x,float z){
+  vec2 p=vec2(x,z); float r=length(p);
+  float m=sstep(2.0,3.6,abs(r-70.0));
+  m*=max(sstep(63.0,66.0,r),0.25);
+  m*=sstep(10.0,14.0,abs(z-riverZ(x)));
+  float rd=min(min(segD(p,vec4(0.0,-70.0,0.0,-330.0)),segD(p,vec4(-49.5,49.5,-95.0,92.0))),min(segD(p,vec4(-95.0,92.0,-170.0,150.0)),min(segD(p,vec4(70.0,0.0,112.0,-14.0)),segD(p,vec4(112.0,-14.0,142.0,-30.0)))));
+  m*=sstep(1.8,3.0,rd);
+  if(x>95.0&&x<230.0&&z>30.0&&z<180.0) m=0.0;
+  if(x>-140.0&&x<-70.0&&z>-125.0&&z<-72.0) m=0.0;
+  m*=sstep(42.0,52.0,length(p-vec2(-170.0,160.0)));
+  if(x>-235.0&&x<-223.0) m=0.0;
+  return m;
+}
+void main(){
+  int id=gl_InstanceID; int gx=id%uGSide; int gz=id/uGSide;
+  ivec2 base=ivec2(floor(uGC.xz/uGS))-uGSide/2;
+  int ci=base.x+gx, cj=base.y+gz;
+  float h1=hashI(ci*3+11,cj*5+7), h2=hashI(ci*7+3,cj*3+19), h3=hashI(ci+101,cj+57), h4=hashI(ci*13+5,cj*11+3);
+  float x=(float(ci)+h1)*uGS, z=(float(cj)+h2)*uGS;
+  float d2=length(vec2(x,z)-uGC.xz);
+  float sc=(1.0-sstep(uGR*0.55,uGR,d2))*grassMask(x,z);   // blades shrink away at the edge of the patch
+  if(sc<0.04){ gl_Position=vec4(2.0,2.0,2.0,1.0); return; }
+  float y=terrainH(x,z);
+  float hgt=(0.16+0.26*h3)*(0.45+0.55*sc);
+  float ang=h4*6.2831;
+  vec3 lean=vec3(cos(ang),0.0,sin(ang))*0.35;
+  float ph=uTime*1.6+x*0.15+z*0.1; lean.xz+=vec2(0.8,0.45)*(sin(ph)*0.35+sin(ph*2.7+x)*0.12);
+  vec3 T=normalize(vec3(lean.x,1.0,lean.z));
+  vec3 C=vec3(x,y,z)+T*hgt*0.5;
+  vec3 N=normalize(vec3(cos(ang+1.57),0.35,sin(ang+1.57))); N=normalize(N-T*dot(N,T));
+  vec3 bright=mix(vec3(0.3,0.52,0.34),vec3(0.46,0.58,0.3),h3), dark=vec3(0.04,0.1,0.09);
+  float dist=length(C-uCam);
+  float ppm=uRes.y*0.5*uProjY/max(dist,0.05);
+  float px=hgt*ppm; float s2=clamp(px,uPxMin,uPxMax)/max(px,1e-5);
+  vec3 col=fogit(shade(C,N,bright,dark,h1,1,1.0),dist,0.88);
+  emitStroke(C,T,N,0.03*s2*(0.5+0.5*sc),hgt*0.5*s2,h1,col,1.0);
+}`;
+
+const FS_BRUSH = `#version 300 es
+precision highp float;
+in vec2 vUv; in vec3 vCol; in float vSeed; in vec2 vL2; in float vAm;
+uniform float uAlphaCut; uniform float uAlphaMul;
+out vec4 o;
+float h11(float n){ return fract(sin(n*12.9898+4.1414)*43758.5453); }
+const float NB=7.0;                       // bristles per stroke — fixed for every stroke
+void main(){
+  float x=vUv.x, y=vUv.y, t01=x*0.5+0.5;
+  float yy=(y*0.5+0.5)*NB; float bi=floor(yy); float by=fract(yy);
+  float s=vSeed*91.7;
+  float r1=h11(s+bi*7.13), r2=h11(s+bi*3.71+11.0), r3=h11(s+bi*1.9+5.0);
+  float xEnd=1.0-0.42*r1, xStart=-1.0+0.28*r2;                         // ragged bristle ends
+  float halfW=mix(0.72,1.0,smoothstep(-1.0,-0.55,x))*(1.0-0.45*smoothstep(0.35,1.0,x));  // loaded head, thinning tail
+  float edge=min(min(x-xStart,xEnd-x)*3.0,(halfW-abs(y))*2.2);
+  float aw=max(fwidth(edge),1e-4);
+  float alpha=clamp(edge/aw*0.5+0.5,0.0,1.0);
+  float streak=h11(floor(t01*12.0+r1*5.0)*1.31+bi*17.0+s);
+  float dry=smoothstep(0.35,1.0,t01)*(0.25+0.75*r3);                    // dry-brush gaps toward the tail
+  float gap=smoothstep(dry*0.9-0.08,dry*0.9+0.08,streak);
+  float fwb=fwidth(yy);
+  float detail=clamp(1.6-fwb*1.6,0.0,1.0);                             // fade bristle detail when sub-pixel
+  alpha*=mix(1.0,gap,detail);
+  alpha*=uAlphaMul;
+  if(alpha<uAlphaCut) discard;
+  // impasto: each bristle leaves a ridge of paint, thick where the brush landed
+  float thick=mix(1.0,0.35,t01)*(0.7+0.6*r2);
+  float ridge=sin(by*3.14159);
+  float dhy=cos(by*3.14159)*thick*0.9;
+  float dhx=-0.35*thick*ridge+(streak-0.5)*0.35;
+  vec3 n=normalize(vec3(-dhx*0.8,-dhy,1.0));
+  vec3 L=normalize(vec3(vL2*0.85,0.55));
+  float dif=dot(n,L);
+  float spec=pow(max(dot(reflect(-L,n),vec3(0.0,0.0,1.0)),0.0),16.0);
+  float bshade=mix(1.0,(0.84+0.32*r3)*(0.72+0.45*dif)*(0.9+0.2*streak),detail);
+  vec3 c=vCol*bshade+spec*0.16*detail*(0.35+thick)*vec3(1.0,0.96,0.88)*(0.4+length(vCol));
+  o=vec4(c,alpha);
+}`;
+
+const VS_SOLID = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aP; layout(location=1) in vec3 aN; layout(location=2) in vec3 aC;
+uniform mat4 uVP; uniform vec3 uCam; uniform vec3 uMoonDir, uMoonTint, uFogCol; uniform float uFogD; uniform vec4 uLP[8]; uniform vec4 uLC[8];
+out vec3 vC;
+void main(){
+  float nd=max(dot(aN,uMoonDir),0.0)*0.85+0.15;
+  vec3 base=aC*(0.55+0.6*nd);
+  float lum=dot(base,vec3(0.3,0.59,0.11));
+  vec3 c=mix(vec3(lum),base,0.5)*uMoonTint;
+  vec3 warm=vec3(0.0);
+  for(int i=0;i<8;i++){ vec3 L=uLP[i].xyz-aP; float d=length(L); float r=uLP[i].w; if(d<r){ float a=1.0-d/r; warm+=uLC[i].rgb*uLC[i].a*a*a*max(dot(aN,L/max(d,1e-3))*0.7+0.3,0.0);} }
+  c=c*(1.0-0.5*clamp(warm.r,0.0,1.0))+aC*warm*1.3;
+  float dist=length(aP-uCam);
+  vC=mix(c,uFogCol,(1.0-exp(-dist*uFogD))*0.9);
+  gl_Position=uVP*vec4(aP,1.0);
+}`;
+const FS_SOLID = `#version 300 es
+precision highp float; in vec3 vC; uniform vec4 uTint; out vec4 o;
+void main(){ o = uTint.a>0.0 ? uTint : vec4(vC,1.0); }`;
+
+function compile(vs, fs) {
+  const p = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { const log = gl.getShaderInfoLog(s); console.error(log); throw new Error('shader: ' + log); }
+    gl.attachShader(p, s);
+  }
+  gl.bindAttribLocation(p, 6, 'aCorner');
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error('link: ' + gl.getProgramInfoLog(p));
+  const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); const name = info.name.replace(/\[0\]$/, ''); u[name] = gl.getUniformLocation(p, info.name); }
+  return { p, u };
+}
+const progWorld = compile(VS_WORLD, FS_BRUSH);
+const progSky = compile(VS_SKY, FS_BRUSH);
+const progGrass = compile(VS_GRASS, FS_BRUSH);
+const progSolid = compile(VS_SOLID, FS_SOLID);
+
+const cornerBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, cornerBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+function bindCorner() { gl.bindBuffer(gl.ARRAY_BUFFER, cornerBuf); gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 2, gl.FLOAT, false, 0, 0); gl.vertexAttribDivisor(6, 0); }
+function makeInstVAO(buf, firstStroke) {
+  const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+  bindCorner();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  const o = firstStroke * STRIDE;
+  const at = (loc, n, type, nz, off) => { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, n, type, nz, STRIDE, o + off); gl.vertexAttribDivisor(loc, 1); };
+  at(0, 3, gl.FLOAT, false, 0); at(1, 2, gl.FLOAT, false, 12); at(2, 4, gl.BYTE, true, 20); at(3, 4, gl.BYTE, true, 24); at(4, 4, gl.UNSIGNED_BYTE, true, 28); at(5, 4, gl.UNSIGNED_BYTE, true, 32);
+  gl.bindVertexArray(null); return vao;
+}
+function uploadChunked(set) {
+  set.finalize();
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, set.buf, gl.STATIC_DRAW);
+  for (const c of set.chunks) c.vao = makeInstVAO(buf, c.start);
+  set.glbuf = buf; set.buf = null; set.f = set.i8 = set.u8c = null;
+  return set;
+}
+function uploadPlain(set) {
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(set.buf, 0, set.n * STRIDE), gl.STATIC_DRAW);
+  set.vao = makeInstVAO(buf, 0); set.count = set.n; return set;
+}
+
+// -------------------------------------------------- solid underpaint
+class Solid {
+  constructor() { this.v = []; this.idx = []; }
+  vert(p, n, c) { this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], c[0], c[1], c[2]); return this.v.length / 9 - 1; }
+  tri(a, b, c, col) { const n = norm(cross(sub(b, a), sub(c, a))); const i = this.vert(a, n, col); this.vert(b, n, col); this.vert(c, n, col); this.idx.push(i, i + 1, i + 2); }
+  quad(a, b, c, d, col) { this.tri(a, b, c, col); this.tri(a, c, d, col); }
+  upload() {
+    this.vao = gl.createVertexArray(); gl.bindVertexArray(this.vao);
+    const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.v), gl.STATIC_DRAW);
+    for (let i = 0; i < 3; i++) { gl.enableVertexAttribArray(i); gl.vertexAttribPointer(i, 3, gl.FLOAT, false, 36, i * 12); }
+    const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(this.idx), gl.STATIC_DRAW);
+    gl.bindVertexArray(null); this.count = this.idx.length; this.v = this.idx = null;
+  }
+}
+const under = (pal, k = 0.3) => [lerp(pal.d[0], pal.b[0], k) * 0.85, lerp(pal.d[1], pal.b[1], k) * 0.85, lerp(pal.d[2], pal.b[2], k) * 0.85];
+
+// ====================================================== WORLD BUILD
+const W = new ChunkedSet(1 << 20);       // opaque world strokes
+const WATER = new ChunkedSet(1 << 15);   // blended water strokes
+const MIRROR = new ChunkedSet(1 << 14);  // mirrored strokes seen in the river
+const SKY = new StrokeSet(1 << 16);
+const solids = new Solid();
+const waterSolid = new Solid();
+const colliders = [];   // {c:[x,y,z], h:[hx,hy,hz], yaw, pitch, kind}
+const obstacles = [];
+const staticLights = [];
+const D = s => s / Math.sqrt(Q);           // spacing helper for density
+
+function emitMirror(p, t, n, hw, hl, pal, wl) {
+  if (p[1] < wl - 0.2) return;
+  MIRROR.push([p[0], 2 * wl - p[1], p[2]], [t[0], -t[1], t[2]], [n[0], -n[1], n[2]], hw, hl, pal, MAT.MIRROR);
+}
+// A stroke emitter that optionally mirrors into the river
+function S(p, t, n, hw, hl, pal, mat = 0, tw = 0, ao = 1, mirrorWL = null) {
+  W.push(p, t, n, hw, hl, pal, mat, tw, ao);
+  if (mirrorWL !== null) emitMirror(p, t, n, hw, hl, pal, mirrorWL);
+}
+function nearRiverWL(x, z, r = 28) { return Math.abs(z - riverZ(x)) < r ? waterLevel(x) : null; }
+
+// ---- local box frame helper (yaw rotates local x/z into world)
+function boxFrame(cx, cy, cz, yaw) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  return {
+    p: (lx, ly, lz) => [cx + lx * c + lz * s, cy + ly, cz - lx * s + lz * c],
+    d: (lx, ly, lz) => [lx * c + lz * s, ly, -lx * s + lz * c],
+  };
+}
+// strokes over a planar rectangle (origin o, edge vectors u, v), normal n
+function paintRect(o, u, v, n, pal, dens, opts = {}) {
+  const area = len(u) * len(v); const cnt = Math.max(1, Math.round(area * dens * Q));
+  const hl = opts.hl || 0.32, hw = opts.hw || 0.1, mat = opts.mat || 0, mirror = opts.mirror ?? null;
+  const tdir = opts.tdir ? norm(opts.tdir) : null;
+  for (let i = 0; i < cnt; i++) {
+    const a = rnd(), b = rnd();
+    if (opts.skip && opts.skip(a, b)) continue;
+    const p = add(o, add(scl(u, a), scl(v, b)));
+    let t = tdir ? tdir : (rnd() < 0.5 ? norm(u) : norm(v));
+    t = onPlane(add(t, scl([rnd() - .5, rnd() - .5, rnd() - .5], 0.35)), n);
+    S(add(p, scl(n, 0.02)), t, n, hw * rr(.8, 1.2), hl * rr(.75, 1.25), pal, mat, 0, opts.ao ?? 1, mirror);
+  }
+}
+function paintTri(a, b, c, n, pal, dens, opts = {}) {
+  const area = len(cross(sub(b, a), sub(c, a))) / 2; const cnt = Math.max(1, Math.round(area * dens * Q));
+  const tdir = opts.tdir ? norm(opts.tdir) : norm(sub(b, a));
+  for (let i = 0; i < cnt; i++) {
+    let u = rnd(), v = rnd(); if (u + v > 1) { u = 1 - u; v = 1 - v; }
+    const p = add(a, add(scl(sub(b, a), u), scl(sub(c, a), v)));
+    const t = onPlane(add(tdir, scl([rnd() - .5, rnd() - .5, rnd() - .5], 0.4)), n);
+    S(add(p, scl(n, 0.02)), t, n, (opts.hw || 0.1) * rr(.8, 1.2), (opts.hl || 0.32) * rr(.75, 1.25), pal, opts.mat || 0, 0, 1, opts.mirror ?? null);
+  }
+}
+
+// ---------------------------------------------------------- terrain
+function zoneAt(x, z) {
+  const r = Math.hypot(x, z);
+  if (Math.abs(r - RING_R) < 1.7) return 'ring';
+  const [rd, seg] = roadDist(x, z); if (rd < 1.6) return ['road', seg];
+  const dr = Math.abs(z - riverZ(x)); if (dr < 6) return 'bed'; if (dr < 10.5) return 'bank';
+  if (x < -223.5 && x > -234.5) return 'rock';
+  if (r < RING_R - 2.2) return 'sun';
+  for (const w of WHEAT) if (inRect(x, z, w)) return 'wheat';
+  if (Math.hypot(x - VC[0], z - VC[1]) < 48) return 'village';
+  return 'meadow';
+}
+function terrainStroke(x, z, sizeK) {
+  let zn = zoneAt(x, z), seg = null;
+  if (Array.isArray(zn)) { seg = zn[1]; zn = zn[0]; }
+  if (zn === 'bed') return;
+  const y = H(x, z), n = terrainNormal(x, z);
+  let pal, t, hl = 0.7 * sizeK, hw = 0.22 * sizeK, ao = 1;
+  switch (zn) {
+    case 'ring': { const a = Math.atan2(z, x); t = [-Math.sin(a), 0, Math.cos(a)]; pal = PAL.path; hw *= 0.8; break; }
+    case 'road': { t = norm([seg[2] - seg[0], 0, seg[3] - seg[1]]); pal = PAL.path; hw *= 0.8; break; }
+    case 'bank': pal = PAL.bank; t = [1, 0, riverDZ(x)]; break;
+    case 'rock': pal = rnd() < .5 ? PAL.rock : PAL.rock2; t = [0, 1, 0]; break;
+    case 'sun': pal = PAL.soil; ao = 0.6; t = [Math.cos(x * 0.3), 0, Math.sin(z * 0.3)]; break;
+    case 'wheat': { pal = PAL.wheatG; const a = 0.5 * Math.sin(z * 0.12) + (vnoise(x * .05, z * .05) - .5) * 1.5; t = [Math.cos(a), 0, Math.sin(a)]; break; }
+    case 'village': pal = PAL.village; t = [rnd() - .5, 0, rnd() - .5]; break;
+    default: {
+      pal = vnoise(x * 0.04 + 5, z * 0.04) > 0.55 ? PAL.meadow2 : PAL.meadow;
+      const a = vnoise(x * 0.025, z * 0.025) * 9 + vnoise(x * 0.11, z * 0.11) * 1.6; t = [Math.cos(a), 0, Math.sin(a)];
+    }
+  }
+  t = onPlane(add(norm(t), [(rnd() - .5) * .3, 0, (rnd() - .5) * .3]), n);
+  S([x, y + 0.02, z], t, n, hw * rr(.8, 1.2), hl * rr(.75, 1.3), pal, 0, 0, ao, zn === 'bank' ? waterLevel(x) : null);
+}
+function genTerrain() {
+  const s1 = D(0.85), IN = 260;
+  for (let gx = -IN; gx < IN; gx += s1) for (let gz = -IN; gz < IN; gz += s1) terrainStroke(gx + rnd() * s1, gz + rnd() * s1, 1);
+  // paths and roads get a second, denser pass so the trodden earth reads up close
+  const sp = D(0.5);
+  for (let gx = -RING_R - 3; gx < RING_R + 3; gx += sp) for (let gz = -RING_R - 3; gz < RING_R + 3; gz += sp) {
+    const x = gx + rnd() * sp, z = gz + rnd() * sp; if (Math.abs(Math.hypot(x, z) - RING_R) < 1.7) terrainStroke(x, z, 0.8);
+  }
+  for (const s of ROADS) { const L = Math.hypot(s[2] - s[0], s[3] - s[1]); for (let i = 0; i < L * 3.2 / (sp * sp); i++) { const t = rnd(), w = (rnd() - .5) * 3.1; const dx = (s[2] - s[0]) / L, dz = (s[3] - s[1]) / L; const x = s[0] + dx * L * t - dz * w, z = s[1] + dz * L * t + dx * w; if (Math.abs(x) < 300 && Math.abs(z) < 300 && roadDist(x, z)[0] < 1.6) terrainStroke(x, z, 0.8); } }
+  const s2 = D(2.3), OUT = 600;
+  for (let gx = -OUT; gx < OUT; gx += s2) for (let gz = -OUT; gz < OUT; gz += s2) {
+    const x = gx + rnd() * s2, z = gz + rnd() * s2;
+    if (Math.abs(x) < IN && Math.abs(z) < IN) continue;
+    if (Math.hypot(x, z) > 640) continue;
+    terrainStroke(x, z, 2.6);
+  }
+  // steep cliff face needs extra strokes per unit of ground area
+  const sc = D(0.8);
+  const tstep = 0.032 / Math.sqrt(Q);
+  for (let z = -600; z < 600; z += sc) for (let t = 0; t < 1; t += tstep) {
+    const x = -223.5 - 11 * (t + rnd() * tstep), zz = z + rnd() * sc;
+    if (Math.abs(zz - riverZ(x)) < 6) continue;
+    const y = H(x, zz), n = terrainNormal(x, zz);
+    const tt = onPlane([rnd() - .5, 1, rnd() - .5], n);
+    S([x, y + 0.05, zz], tt, n, 0.4 * rr(.8, 1.2), 0.95 * rr(.7, 1.3), rnd() < .5 ? PAL.rock : PAL.rock2, 0, 0, 1, nearRiverWL(x, zz, 20));
+  }
+  // underpainting of the ground: polar mesh out to the mountains
+  const rings = []; let r = 0; while (r < 1150) { rings.push(r); r += r < 300 ? 2.5 : r < 600 ? 5 : 20; }
+  const SEG = 480, verts = [];
+  for (const rr_ of rings) for (let k = 0; k < SEG; k++) {
+    const a = k / SEG * Math.PI * 2, x = Math.cos(a) * rr_, z = Math.sin(a) * rr_;
+    let y = H(x, z); if (rr_ > 620) y = lerp(y, -4, sstep(620, 900, rr_));
+    let zn = zoneAt(x, z); if (Array.isArray(zn)) zn = zn[0];
+    const pal = { ring: PAL.path, road: PAL.path, bed: PAL.bank, bank: PAL.bank, rock: PAL.rock, sun: PAL.soil, wheat: PAL.wheatG, village: PAL.village, meadow: PAL.meadow }[zn];
+    verts.push([x, y, z, under(pal, zn === 'bed' ? 0.0 : 0.25)]);
+  }
+  const base = solids.v.length / 9;
+  for (const [x, y, z, c] of verts) { const n = terrainNormal(x, z); solids.v.push(x, y, z, n[0], n[1], n[2], c[0], c[1], c[2]); }
+  for (let i = 0; i < rings.length - 1; i++) for (let k = 0; k < SEG; k++) {
+    const a = base + i * SEG + k, b = base + i * SEG + (k + 1) % SEG, c = a + SEG, d = b + SEG;
+    solids.idx.push(a, c, b, b, c, d);
+  }
+}
+
+// ---------------------------------------------------------- mountains
+function ridge(layer, a) {
+  const L = [[38, 58], [85, 120], [165, 170]][layer];
+  const cx = Math.cos(a), sz = Math.sin(a), o = layer * 17.3;
+  return L[0] + L[1] * (0.6 * vnoise(cx * 2.2 + o, sz * 2.2 + o) + 0.3 * vnoise(cx * 6 + o + 3, sz * 6 + o) + 0.1 * vnoise(cx * 17 + o, sz * 17 + 1));
+}
+function genMountains() {
+  const LAY = [
+    { R: 640, pal: P([0.36, 0.54, 0.55], [0.12, 0.2, 0.3]), hl: 3.4, hw: 1.1, n: 46000 },
+    { R: 860, pal: P([0.48, 0.55, 0.82], [0.17, 0.2, 0.4]), hl: 5.2, hw: 1.7, n: 44000 },
+    { R: 1100, pal: P([0.64, 0.7, 0.9], [0.27, 0.3, 0.5]), hl: 7.2, hw: 2.4, n: 46000 },
+  ];
+  const snow = P([0.96, 0.97, 1.0], [0.5, 0.58, 0.78]);
+  LAY.forEach((L, li) => {
+    const cnt = Math.round(L.n * Q);
+    for (let i = 0; i < cnt; i++) {
+      const a = rnd() * Math.PI * 2, top = ridge(li, a);
+      const y = -6 + (top + 6) * Math.pow(rnd(), 0.8);
+      const R = L.R + rnd() * 12;
+      const da = 0.004, slope = (ridge(li, a + da) - ridge(li, a - da)) / (2 * da * R);
+      const inward = [-Math.cos(a), 0, -Math.sin(a)], side = [-Math.sin(a), 0, Math.cos(a)];
+      const n = norm(add(add(inward, [0, 1.25 + rnd() * 0.6, 0]), scl(side, -slope * 1.2)));
+      const nearTop = (y - (top - 25)) / 25;
+      let t = norm(add(side, [0, slope * (nearTop > 0 ? 1 : 0.4) + (rnd() - .5) * 0.6, 0]));
+      t = onPlane(t, n);
+      const isSnow = li === 2 && y > 175 + 80 * vnoise(Math.cos(a) * 9, Math.sin(a) * 9) && rnd() < 0.92;
+      W.push([Math.cos(a) * R, y, Math.sin(a) * R], t, n, L.hw * rr(.7, 1.3), L.hl * rr(.7, 1.3), isSnow ? snow : L.pal, 0, 0, 1, 0.16);
+    }
+    // solid silhouette under the strokes
+    const SEG = 720, col = scl(L.pal.d, li === 2 ? 0.75 : 0.55);
+    for (let k = 0; k < SEG; k++) {
+      const a0 = k / SEG * Math.PI * 2, a1 = (k + 1) / SEG * Math.PI * 2;
+      const R = L.R + 14;
+      const p0 = [Math.cos(a0) * R, -12, Math.sin(a0) * R], p1 = [Math.cos(a1) * R, -12, Math.sin(a1) * R];
+      const q0 = [Math.cos(a0) * R, ridge(li, a0) - 1, Math.sin(a0) * R], q1 = [Math.cos(a1) * R, ridge(li, a1) - 1, Math.sin(a1) * R];
+      solids.quad(p0, q0, q1, p1, col);
+    }
+  });
+}
+
+// ---------------------------------------------------------- river
+function genRiver() {
+  const s = D(0.7);
+  for (let x = -600; x < 600; x += s) {
+    if (x > -234 && x < -224) continue;
+    const rz = riverZ(x), wl = waterLevel(x), t = norm([1, 0, riverDZ(x)]);
+    for (let w = -6.8; w < 6.8; w += s) {
+      const xx = x + rnd() * s, z = riverZ(xx) + w + rnd() * s * 0.5;
+      WATER.push([xx, waterLevel(xx) + 0.03, z], onPlane(add(t, [(rnd() - .5) * .2, 0, (rnd() - .5) * .2]), [0, 1, 0]), [0, 1, 0], 0.16 * rr(.8, 1.2), 0.85 * rr(.7, 1.4), PAL.water, MAT.WATER, 0, 1, 0.1);
+    }
+  }
+  // water surface plane (depth mask for the reflections + darkening tint)
+  for (const [x0, x1] of [[-620, -233], [-225, 620]]) {
+    for (let x = x0; x < x1; x += 4) {
+      const xa = x, xb = Math.min(x + 4, x1);
+      const A = [xa, waterLevel(xa), riverZ(xa) - 8], B = [xb, waterLevel(xb), riverZ(xb) - 8], C = [xb, waterLevel(xb), riverZ(xb) + 8], Dd = [xa, waterLevel(xa), riverZ(xa) + 8];
+      waterSolid.quad(A, Dd, C, B, [0, 0, 0]);
+    }
+  }
+  // waterfall over the cliff
+  const fz = riverZ(CLIFF_X), cnt = Math.round(5200 * Q);
+  for (let i = 0; i < cnt; i++) {
+    const t = rnd(), x = -223.5 - 11 * t, z = riverZ(x) + (rnd() - .5) * 11;
+    const n = terrainNormal(x, z), y = H(x, z) + 0.35 + rnd() * 0.3;
+    const down = onPlane([0, -1, 0], n);
+    W.push([x + 0.3, y, z], down, n, 0.12 * rr(.7, 1.3), 0.9 * rr(.7, 1.3), PAL.fall, MAT.FALL, 0, 1, 0.1);
+  }
+  // foam at the foot
+  for (let i = 0; i < 900 * Q; i++) {
+    const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * 7, x = -222 + Math.cos(a) * r * 0.6, z = fz + Math.sin(a) * r;
+    W.push([x, waterLevel(-220) + 0.15 + rnd() * 0.3, z], norm([Math.cos(a), 0.2, Math.sin(a)]), [0, 1, 0], 0.14, 0.4, PAL.fall, MAT.SWAY, 0.4);
+  }
+  staticLights.push({ p: [-215, waterLevel(-215) + 3, fz], r: 0, c: [0, 0, 0], i: 0 });
+}
+
+// ---------------------------------------------------------- bridge
+function genBridge() {
+  const zc = BRIDGE_Z, wl = waterLevel(0), hx = 2.6, archR = 3.3;
+  const st = PAL.stone, dens = 14;
+  for (let z = zc - 11; z < zc + 11; z += D(0.32)) for (let x = -hx; x < hx; x += D(0.32)) {
+    const zz = z + rnd() * 0.3, xx = x + rnd() * .3, y = deckY(zz), dy = (deckY(zz + .1) - deckY(zz - .1)) / .2;
+    const n = norm([0, 1, -dy]);
+    S([xx, y + 0.03, zz], onPlane([rnd() < .5 ? 1 : 0, 0, 1], n), n, 0.13, 0.3, rnd() < .5 ? st : PAL.path, 0, 0, 1, wl);
+  }
+  for (const sx of [-1, 1]) {
+    // spandrel walls with the arch cut out
+    const cnt = Math.round(22 * 6 * dens * Q);
+    for (let i = 0; i < cnt; i++) {
+      const z = zc - 11 + rnd() * 22, top = deckY(z) + 0.7, bot = Math.min(H(sx * hx, z), wl) - 0.6;
+      const y = bot + rnd() * (top - bot);
+      if (Math.hypot(z - zc, y - wl) < archR) continue;
+      const n = [sx, 0, 0];
+      S([sx * (hx + 0.02), y, z], onPlane([0, rnd() - .5 * 0.3, 1], n), n, 0.12, 0.3 * rr(.7, 1.3), st, 0, 0, 1, wl);
+    }
+    // parapet top
+    for (let z = zc - 11; z < zc + 11; z += D(0.35)) S([sx * (hx - 0.15), deckY(z) + 0.72, z], [0, 0, 1], [0, 1, 0], 0.12, 0.3, st, 0, 0, 1, wl);
+    for (let z = zc - 11; z < zc + 11; z += D(0.35)) for (let y = 0; y < 0.7; y += 0.25) S([sx * (hx - 0.3), deckY(z) + y + 0.05, z], [0, 0, 1], [-sx, 0, 0], 0.12, 0.3, st, 0, 0, 1, wl);
+  }
+  // arch intrados
+  for (let i = 0; i < 700 * Q; i++) {
+    const a = rnd() * Math.PI, x = (rnd() * 2 - 1) * hx;
+    const p = [x, wl + Math.sin(a) * archR, zc + Math.cos(a) * archR], n = norm([0, -Math.sin(a), -Math.cos(a)]);
+    S(p, [1, 0, 0], n, 0.12, 0.28, st, 0, 0, 0.6, wl);
+  }
+  // colliders: tilted deck segments
+  const seg = 8;
+  for (let i = 0; i < seg; i++) {
+    const za = zc - 11 + 22 * i / seg, zb = zc - 11 + 22 * (i + 1) / seg, ya = deckY(za + 1e-3), yb = deckY(zb - 1e-3);
+    const L = Math.hypot(zb - za, yb - ya), pitch = -Math.atan2(yb - ya, zb - za);
+    colliders.push({ c: [0, (ya + yb) / 2 - 0.3 * Math.cos(pitch), (za + zb) / 2], h: [hx, 0.3, L / 2 + 0.05], yaw: 0, pitch, kind: 'bridge' });
+  }
+  // underpaint deck
+  const col = under(st, 0.3);
+  for (let i = 0; i < 22; i++) {
+    const za = zc - 11 + i, zb = za + 1;
+    solids.quad([-hx, deckY(za), za], [-hx, deckY(zb), zb], [hx, deckY(zb), zb], [hx, deckY(za), za], col);
+  }
+  staticLights.push({ p: [hx + 0.6, deckY(zc) + 2.2, zc], r: 14, c: [1, 0.6, 0.28], i: 1.0, lamp: true });
+}
+
+// ---------------------------------------------------------- buildings
+function house(cx, cz, w, d, hWall, yaw, o = {}) {
+  const corners = [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]];
+  const F0 = boxFrame(cx, 0, cz, yaw);
+  let gmin = 1e9; for (const [a, b] of corners) { const p = F0.p(a, 0, b); gmin = Math.min(gmin, H(p[0], p[2])); }
+  const y0 = gmin - 0.6, top = H(cx, cz) + hWall, F = boxFrame(cx, 0, cz, yaw);
+  const wallPal = o.wall || [PAL.plaster, PAL.plaster2, PAL.plaster3][Math.floor(rnd() * 3)];
+  const roofPal = o.roof || (rnd() < 0.55 ? PAL.roofBlue : rnd() < .5 ? PAL.roofRed : PAL.roofDark);
+  const dens = o.dens || 9, mirror = nearRiverWL(cx, cz, 30);
+  const walls = [ // [origin(local), u, v, normal]
+    [[-w / 2, 0, d / 2], [w, 0, 0], [0, 0, 1]], [[w / 2, 0, -d / 2], [-w, 0, 0], [0, 0, -1]],
+    [[w / 2, 0, d / 2], [0, 0, -d], [1, 0, 0]], [[-w / 2, 0, -d / 2], [0, 0, d], [-1, 0, 0]],
+  ];
+  const rh = o.roofH ?? Math.min(w, d) * 0.45, ridgeAlongX = w >= d;
+  for (const [lo, lu, ln] of walls) {
+    const o3 = F.p(lo[0], y0, lo[2]), u = F.d(...lu), v = [0, top - y0, 0], n = F.d(...ln);
+    paintRect(o3, u, v, n, wallPal, dens, { hl: 0.34, hw: 0.11, tdir: rnd() < .5 ? [0, 1, 0] : u, mirror });
+    solids.quad(o3, add(o3, v), add(add(o3, u), v), add(o3, u), under(wallPal, 0.35));
+    // gables on the short sides
+    const along = Math.abs(lu[0]) > 0;
+    if (along !== ridgeAlongX) {
+      const a = add(o3, v), b = add(add(o3, u), v), c = add(add(o3, scl(u, 0.5)), add(v, [0, rh, 0]));
+      paintTri(a, b, c, n, wallPal, dens, { tdir: [0, 1, 0], mirror }); solids.tri(a, c, b, under(wallPal, 0.35));
+    }
+    // windows
+    const L = len(u), nWin = Math.max(1, Math.floor(L / 2.6));
+    for (let k = 0; k < nWin; k++) {
+      if (rnd() < 0.15) continue;
+      const lit = rnd() < (o.litChance ?? 0.75), f = (k + 0.5) / nWin;
+      const wy = top - hWall * 0.5 + (o.tall ? -1 : 0), ww = o.tall ? 0.45 : 0.36, wh = o.tall ? 1.3 : 0.48;
+      const c = add(add(o3, scl(u, f)), [0, wy - y0, 0]);
+      const un = norm(u);
+      for (let q = 0; q < 6; q++) {
+        const p = add(add(c, scl(un, (rnd() - .5) * ww * 1.6)), add([0, (rnd() - .5) * wh * 1.6, 0], scl(n, 0.06)));
+        W.push(p, rnd() < .5 ? [0, 1, 0] : un, n, ww * 0.45, wh * 0.55, lit ? PAL.window : PAL.door, lit ? MAT.EMIT : 0, 0, 1, 0.1);
+        if (mirror !== null && lit) emitMirror(p, [0, 1, 0], n, ww * .45, wh * .55, PAL.window, mirror);
+      }
+      if (lit && k === 0) staticLights.push({ p: add(c, scl(n, 1.6)), r: o.lightR || 11, c: [1, 0.6, 0.27], i: 1.1 });
+    }
+  }
+  // roof
+  const ov = 0.45;
+  const ridgeY = top + rh;
+  const rw = ridgeAlongX ? w / 2 + ov : d / 2 + ov, rd = ridgeAlongX ? d / 2 + ov : w / 2 + ov;
+  for (const sgn of [-1, 1]) {
+    let eA, eB, rA, rB;
+    if (ridgeAlongX) { eA = F.p(-rw, top - 0.15, sgn * rd); eB = F.p(rw, top - 0.15, sgn * rd); rA = F.p(-rw, ridgeY, 0); rB = F.p(rw, ridgeY, 0); }
+    else { eA = F.p(sgn * rd, top - 0.15, -rw); eB = F.p(sgn * rd, top - 0.15, rw); rA = F.p(0, ridgeY, -rw); rB = F.p(0, ridgeY, rw); }
+    const u = sub(eB, eA), v = sub(rA, eA); let n = norm(cross(u, v)); if (n[1] < 0) n = scl(n, -1);
+    paintRect(eA, u, v, n, roofPal, dens * 1.1, { hl: 0.38, hw: 0.12, tdir: v, mirror });
+    solids.quad(eA, rA, rB, eB, under(roofPal, 0.3));
+  }
+  if (o.chimney !== false && rnd() < 0.7) {
+    const cxl = (rnd() - .5) * w * 0.5, czl = (rnd() - .5) * d * 0.3;
+    const c0 = F.p(cxl, ridgeY - 0.6, czl);
+    for (let i = 0; i < 50 * Q; i++) { const a = Math.floor(rnd() * 4) * Math.PI / 2, n = F.d(Math.cos(a), 0, Math.sin(a)); W.push(add(add(c0, scl(n, 0.32)), [0, rnd() * 1.3, 0]), [0, 1, 0], n, 0.1, 0.22, PAL.roofRed, 0); }
+  }
+  colliders.push({ c: [cx, (y0 + top) / 2, cz], h: [w / 2, (top - y0) / 2, d / 2], yaw, kind: 'building' });
+  return { top, ridgeY, F, y0 };
+}
+function genVillage() {
+  const vr = mulberry(99); const placed = [];
+  const church = { x: VC[0] - 14, z: VC[1] + 14 };
+  // church: nave + tower + spire
+  const yaw = 0.35, nave = house(church.x, church.z, 18, 8.5, 8, yaw, { wall: PAL.plaster2, roof: PAL.roofDark, tall: true, litChance: 0.9, lightR: 16, chimney: false });
+  const F = boxFrame(church.x, 0, church.z, yaw), tx = 10.5, ts = 2.4, tTop = nave.top + 7;
+  const tb = H(church.x, church.z) - 0.5;
+  for (const [nx, nz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const n = F.d(nx, 0, nz), o = F.p(tx + nx * ts - nz * ts, tb, nz * ts + nx * ts), u = F.d(nz * 2 * ts, 0, -nx * 2 * ts);
+    paintRect(o, u, [0, tTop - tb, 0], n, PAL.plaster, 9, { tdir: [0, 1, 0] });
+    solids.quad(o, add(o, [0, tTop - tb, 0]), add(add(o, u), [0, tTop - tb, 0]), add(o, u), under(PAL.plaster, 0.3));
+    const wc = add(F.p(tx + nx * (ts + 0.05), tTop - 2.2, nz * (ts + 0.05)), [0, 0, 0]);
+    for (let q = 0; q < 8; q++) W.push(add(wc, [(rnd() - .5) * 0.5 * Math.abs(nz), (rnd() - .5) * 1.2, (rnd() - .5) * 0.5 * Math.abs(nx)]), [0, 1, 0], n, 0.25, 0.5, PAL.window, MAT.EMIT);
+    // spire faces
+    const a = F.p(tx + nx * ts - nz * ts, tTop, nz * ts + nx * ts), b = F.p(tx + nx * ts + nz * ts, tTop, nz * ts - nx * ts), apex = F.p(tx, tTop + 15, 0);
+    let fn = norm(cross(sub(b, a), sub(apex, a))); if (dot(fn, n) < 0) fn = scl(fn, -1);
+    paintTri(a, b, apex, fn, PAL.roofDark, 12, { tdir: sub(apex, a), hl: 0.45 });
+    solids.tri(a, apex, b, under(PAL.roofDark, 0.3));
+  }
+  staticLights.push({ p: F.p(tx, tTop - 2, 0), r: 18, c: [1, 0.62, 0.3], i: 1.1 });
+  colliders.push({ c: F.p(tx, (tb + tTop) / 2, 0), h: [ts, (tTop - tb) / 2, ts], yaw, kind: 'building' });
+  placed.push([church.x, church.z, 13]);
+  for (let tries = 0; tries < 400 && placed.length < 17; tries++) {
+    const a = vr() * Math.PI * 2, r = 10 + vr() * 42, x = VC[0] + Math.cos(a) * r, z = VC[1] + Math.sin(a) * r;
+    if (roadDist(x, z)[0] < 6.5) continue;
+    if (placed.some(([px, pz, pr]) => Math.hypot(px - x, pz - z) < pr + 7)) continue;
+    const w = 6 + vr() * 4, d = 4.5 + vr() * 2.5;
+    house(x, z, w, d, 3.6 + vr() * 1.8, vr() * Math.PI, {});
+    placed.push([x, z, Math.max(w, d) / 2 + 1]);
+  }
+  // lamp posts along the village road
+  for (const t of [0.3, 0.65, 0.95]) { const s = ROADS[2]; const x = lerp(s[0], s[2], t) + 2.4, z = lerp(s[1], s[3], t); lampPost(x, z); }
+}
+function lampPost(x, z) {
+  const y = H(x, z);
+  for (let i = 0; i < 18 * Q + 6; i++) W.push([x, y + rnd() * 2.6, z], [0, 1, 0], norm([rnd() - .5, 0, rnd() - .5]), 0.06, 0.25, PAL.metal);
+  for (let i = 0; i < 14; i++) { const a = rnd() * 6.28; W.push([x + Math.cos(a) * 0.15, y + 2.75 + (rnd() - .5) * .2, z + Math.sin(a) * 0.15], [0, 1, 0], [Math.cos(a), 0, Math.sin(a)], 0.1, 0.16, PAL.lantern, MAT.EMIT); }
+  staticLights.push({ p: [x, y + 2.8, z], r: 13, c: [1, 0.62, 0.28], i: 1.2 });
+}
+
+// ---------------------------------------------------------- windmill (blades are a dynamic part)
+let bladePart = null, bladeHub = null, bladeYaw = 0;
+function genWindmill() {
+  const [cx, cz] = WM, y0 = H(cx, cz) - 1, hT = 13, r0 = 3.4, r1 = 2.3;
+  const pal = PAL.plaster3, cnt = Math.round(2 * Math.PI * 2.9 * (hT + 1) * 9 * Q);
+  for (let i = 0; i < cnt; i++) {
+    const a = rnd() * Math.PI * 2, t = rnd(), r = lerp(r0, r1, t), y = y0 + t * (hT + 1);
+    const n = norm([Math.cos(a), (r0 - r1) / hT, Math.sin(a)]);
+    W.push([cx + Math.cos(a) * r, y, cz + Math.sin(a) * r], onPlane([-Math.sin(a), (rnd() - .5) * .4, Math.cos(a)], n), n, 0.12, 0.36, pal);
+  }
+  for (let k = 0; k < 24; k++) { // underpaint cylinder
+    const a0 = k / 24 * Math.PI * 2, a1 = (k + 1) / 24 * Math.PI * 2, rb = r0 - 0.05, rt = r1 - 0.05;
+    solids.quad([cx + Math.cos(a0) * rb, y0, cz + Math.sin(a0) * rb], [cx + Math.cos(a0) * rt, y0 + hT + 1, cz + Math.sin(a0) * rt], [cx + Math.cos(a1) * rt, y0 + hT + 1, cz + Math.sin(a1) * rt], [cx + Math.cos(a1) * rb, y0, cz + Math.sin(a1) * rb], under(pal, .35));
+  }
+  const capY = y0 + hT + 1;
+  for (let i = 0; i < 900 * Q; i++) {
+    const a = rnd() * Math.PI * 2, e = Math.acos(rnd()), n = [Math.cos(a) * Math.sin(e), Math.cos(e), Math.sin(a) * Math.sin(e)];
+    W.push([cx + n[0] * 2.7, capY + n[1] * 2.4, cz + n[2] * 2.7], onPlane([0, 1, 0], n), n, 0.13, 0.36, PAL.roofRed);
+  }
+  const f = norm([-cx, 0, -cz]); bladeYaw = Math.atan2(f[0], f[2]);
+  bladeHub = [cx + f[0] * 3.0, capY + 0.6, cz + f[2] * 3.0];
+  // door + lit window facing the hub direction
+  const n = f, side = [-f[2], 0, f[0]];
+  for (let q = 0; q < 10; q++) W.push(add([cx + n[0] * (r0 - 0.05), y0 + 2.2 + rnd() * 1.6, cz + n[2] * (r0 - 0.05)], scl(side, (rnd() - .5) * 0.9)), [0, 1, 0], n, 0.25, 0.4, PAL.door);
+  for (let q = 0; q < 8; q++) W.push(add([cx + n[0] * (r0 - 0.9), y0 + 8 + rnd() * .7, cz + n[2] * (r0 - 0.9)], scl(side, (rnd() - .5) * 0.6)), [0, 1, 0], n, 0.25, 0.32, PAL.window, MAT.EMIT);
+  staticLights.push({ p: [cx + n[0] * 5, y0 + 8, cz + n[2] * 5], r: 14, c: [1, 0.6, 0.27], i: 1.1 });
+  colliders.push({ c: [cx, y0 + 7, cz], h: [r0 * 0.8, 7, r0 * 0.8], yaw: 0, kind: 'building' });
+  // blades in local space (hub at origin, rotation axis +z)
+  const B = new StrokeSet(4096), sail = PAL.plaster, wood = PAL.wood;
+  for (let k = 0; k < 4; k++) {
+    const a = k * Math.PI / 2, d = [Math.cos(a), Math.sin(a), 0], s = [-Math.sin(a), Math.cos(a), 0];
+    for (let r = 0.3; r < 9.5; r += 0.22) B.push(scl(d, r), d, [0, 0, 1], 0.07, 0.2, wood);
+    for (let r = 1.6; r < 9.2; r += 0.5) for (let w = 0.15; w < 1.7; w += 0.4) {
+      const p = add(scl(d, r + rnd() * .3), scl(s, w));
+      B.push(add(p, [0, 0, 0.05]), rnd() < .5 ? d : s, [0, 0, 1], 0.1, 0.24, rnd() < .7 ? sail : wood);
+      B.push(add(p, [0, 0, -0.05]), rnd() < .5 ? d : s, [0, 0, -1], 0.1, 0.24, rnd() < .7 ? sail : wood);
+    }
+  }
+  for (let i = 0; i < 40; i++) { const a = rnd() * 6.28; B.push([Math.cos(a) * .35, Math.sin(a) * .35, 0.3], [-Math.sin(a), Math.cos(a), 0], [0, 0, 1], 0.1, .2, PAL.metal); }
+  bladePart = uploadPlain(B);
+  // cottage next to the mill
+  house(124, -6, 7, 5, 3.6, 0.4, { litChance: 1, lightR: 14 });
+}
+
+// ---------------------------------------------------------- vegetation
+function cypress(cx, cz, h, R) {
+  const y0 = H(cx, cz) - 0.3, cnt = Math.round(h * R * 70 * Q), mirror = nearRiverWL(cx, cz, 30);
+  const prof = t => R * Math.pow(Math.sin(Math.PI * Math.min(1, Math.pow(t, 0.55) * 1.0)), 0.85) * (1 - 0.55 * t) + 0.05;
+  const sw = rnd() * 6.28;
+  for (let i = 0; i < cnt; i++) {
+    const t = Math.pow(rnd(), 0.9), a = rnd() * Math.PI * 2, r = prof(t) * (0.75 + 0.25 * Math.sqrt(rnd()));
+    const out = [Math.cos(a), 0, Math.sin(a)], tang = [-Math.sin(a), 0, Math.cos(a)];
+    const p = [cx + out[0] * r, y0 + t * h, cz + out[2] * r];
+    const n = norm(add(out, [0, 0.25 - t * 0.2, 0]));
+    const twist = Math.sin(t * 11 + a * 2 + sw) * 0.75;
+    const tt = onPlane(add([0, 1, 0], scl(tang, twist)), n);
+    S(p, tt, n, rr(0.11, 0.18) * (0.6 + R / 3), rr(0.45, 0.8) * (0.7 + R / 4), rnd() < 0.72 ? PAL.cypress : PAL.cypress2, MAT.FOLIAGE, t * 0.9, 0.55 + 0.45 * (r / (prof(t) + 0.01)), mirror);
+  }
+  // dark solid core
+  const col = under(PAL.cypress, 0.15), K = 10, L = 12;
+  for (let j = 0; j < L; j++) for (let k = 0; k < K; k++) {
+    const t0 = j / L, t1 = (j + 1) / L, a0 = k / K * 6.283, a1 = (k + 1) / K * 6.283, r0 = prof(t0) * 0.7, r1 = prof(t1) * 0.7;
+    solids.quad([cx + Math.cos(a0) * r0, y0 + t0 * h, cz + Math.sin(a0) * r0], [cx + Math.cos(a0) * r1, y0 + t1 * h, cz + Math.sin(a0) * r1], [cx + Math.cos(a1) * r1, y0 + t1 * h, cz + Math.sin(a1) * r1], [cx + Math.cos(a1) * r0, y0 + t0 * h, cz + Math.sin(a0 + (a1 - a0)) * r0], col);
+  }
+  colliders.push({ c: [cx, y0 + 2, cz], h: [0.7, 2, 0.7], yaw: 0, kind: 'tree' });
+}
+function bush(cx, cz, R) {
+  const y0 = H(cx, cz), cnt = Math.round(R * R * 30 * Q), cy = y0 + R * 0.95 + 1.2;
+  for (let i = 0; i < 26 * Q + 8; i++) W.push([cx + (rnd() - .5) * .3, y0 + rnd() * 1.6, cz + (rnd() - .5) * .3], [0, 1, 0], norm([rnd() - .5, 0, rnd() - .5]), 0.12, 0.3, PAL.trunk);
+  for (let i = 0; i < cnt; i++) {
+    const a = rnd() * 6.283, e = Math.acos(rnd() * 1.6 - 0.6), n = [Math.cos(a) * Math.sin(e), Math.cos(e), Math.sin(a) * Math.sin(e)];
+    const r = R * (0.75 + 0.25 * rnd()) * (1 + 0.15 * Math.sin(a * 3 + e * 4));
+    const t = onPlane(add(cross(n, [0, 1, 0]), [0, (rnd() - .5) * 1.2, 0]), n);
+    W.push([cx + n[0] * r, cy + n[1] * r * 0.8, cz + n[2] * r], t, n, 0.15, 0.42, PAL.olive, MAT.FOLIAGE, 0.25, 0.5 + 0.5 * (n[1] * .5 + .5));
+  }
+  colliders.push({ c: [cx, y0 + 1, cz], h: [0.4, 1, 0.4], yaw: 0, kind: 'tree' });
+}
+function genSunflowers() {
+  const F = norm([0.35, 0, -1]), sp = D(1.45), up = [0, 1, 0];
+  for (let gx = -RING_R; gx < RING_R; gx += sp) for (let gz = -RING_R; gz < RING_R; gz += sp) {
+    const x = gx + rnd() * sp, z = gz + rnd() * sp, r = Math.hypot(x, z);
+    if (r > RING_R - 4.2 || r < 9 || rnd() < 0.08) continue;
+    const y = H(x, z), h = rr(1.3, 2.1), droop = rr(0.5, 0.85);
+    const Fh = norm(add(F, [(rnd() - .5) * .25, 0, (rnd() - .5) * .25]));
+    const top = [x + Fh[0] * 0.12, y + h, z + Fh[2] * 0.12];
+    const nh = norm(add(scl(Fh, Math.cos(droop)), [0, -Math.sin(droop), 0]));
+    const sideN = norm(cross(Fh, up));
+    for (let k = 0; k < 3; k++) { const t0 = (k + 0.5) / 3; const p = [x + Fh[0] * 0.12 * t0 * t0, y + h * t0, z + Fh[2] * 0.12 * t0 * t0]; W.push(p, norm(add(up, scl(Fh, 0.25 * t0))), sideN, 0.03, h / 6.5, PAL.stem, MAT.SWAY, t0); }
+    for (let k = 0; k < 2; k++) { const a = rnd() * 6.28, d = [Math.cos(a), 0.7, Math.sin(a)], p = [x + d[0] * 0.15, y + h * rr(0.35, 0.65), z + d[2] * 0.15]; W.push(p, norm(d), norm([-d[2], 0.4, d[0]]), 0.08, 0.17, PAL.leaf, MAT.SWAY, 0.5); }
+    const e1 = norm(cross(nh, up)), e2 = cross(e1, nh);
+    const head = add(top, scl(nh, 0.06));
+    for (let k = 0; k < 4; k++) { const a = rnd() * 6.28; W.push(add(head, add(scl(e1, Math.cos(a) * 0.08), scl(e2, Math.sin(a) * 0.08))), norm(add(scl(e1, Math.sin(a)), scl(e2, -Math.cos(a)))), nh, 0.08, 0.11, PAL.seedC, MAT.SWAY, 1); }
+    const np = 11, ph = rnd() * 6.28;
+    for (let k = 0; k < np; k++) { const a = ph + k / np * 6.283, d = add(scl(e1, Math.cos(a)), scl(e2, Math.sin(a))); W.push(add(head, scl(d, 0.29)), d, nh, 0.055, 0.13, PAL.petal, MAT.SWAY, 1); }
+    for (let k = 0; k < 2; k++) W.push(add(top, scl(nh, -0.05)), norm(add(e1, scl(e2, rnd() - .5))), scl(nh, -1), 0.1, 0.16, PAL.leaf, MAT.SWAY, 1);
+  }
+}
+function genWheat() {
+  const sp = D(0.46);
+  for (const R of WHEAT) for (let gx = R[0]; gx < R[1]; gx += sp) for (let gz = R[2]; gz < R[3]; gz += sp) {
+    const x = gx + rnd() * sp, z = gz + rnd() * sp;
+    if (roadDist(x, z)[0] < 2.5) continue;
+    const y = H(x, z), a = rnd() * 6.283, lean = [0.25 + Math.sin(z * 0.1) * 0.15 + (rnd() - .5) * .2, 1, 0.12 + (rnd() - .5) * .2];
+    const t = norm(lean), hh = rr(0.85, 1.2);
+    const n = onPlane([Math.cos(a), 0, Math.sin(a)], t);
+    W.push([x + t[0] * hh * .5, y + hh * 0.5, z + t[2] * hh * .5], t, n, 0.08, hh * 0.5, rnd() < .2 ? PAL.wheat2 : PAL.wheat, MAT.SWAY, 0.9);
+  }
+}
+function genVegetation() {
+  const cyp = [[-92, 22, 17, 2.6], [-118, 96, 13, 2.0], [-126, 103, 11, 1.8], [-208, 128, 14, 2.1], [-140, 205, 12, 2.0], [42, 96, 12, 2.0],
+    [-30, -102, 11, 1.8], [14, -126, 12, 1.9], [186, -62, 13, 2.1], [-62, 142, 12, 1.9], [96, -98, 10, 1.7], [-250, -110, 13, 2.0], [-20, 88, 10, 1.6], [-150, 60, 12, 2.0], [60, -86, 9, 1.6]];
+  for (const c of cyp) cypress(...c);
+  const vr = mulberry(5); let n = 0;
+  for (let i = 0; i < 400 && n < 34; i++) {
+    const x = (vr() - .5) * 460, z = (vr() - .5) * 460;
+    if (zoneAt(x, z) !== 'meadow') continue;
+    if (Math.abs(Math.hypot(x, z) - RING_R) < 12 || roadDist(x, z)[0] < 6) continue;
+    bush(x, z, 1.6 + vr() * 1.8); n++;
+  }
+}
+
+// ---------------------------------------------------------- obstacles on the ring path
+function genObstacles() {
+  const defs = [[30, 'fence'], [85, 'wall'], [150, 'log'], [200, 'fence'], [242, 'wall'], [320, 'log']];
+  for (const [deg, kind] of defs) {
+    const a = deg * Math.PI / 180, cx = Math.cos(a) * RING_R, cz = Math.sin(a) * RING_R, yaw = -a, gy = H(cx, cz);
+    const F = boxFrame(cx, gy, cz, yaw), HL = 2.7;
+    let hy, hz;
+    if (kind === 'fence') {
+      hy = 0.55; hz = 0.12;
+      for (let px = -HL; px <= HL + 0.01; px += 1.35) for (let i = 0; i < 14; i++) { const a2 = rnd() * 6.28; const n = F.d(Math.cos(a2), 0, Math.sin(a2)); W.push(add(F.p(px, rnd() * 1.2, 0), scl(n, 0.07)), [0, 1, 0], n, 0.06, 0.2, PAL.wood); }
+      for (const ry of [0.55, 1.0]) for (let px = -HL; px < HL; px += 0.18) for (const s of [-1, 1]) W.push(F.p(px, ry + (rnd() - .5) * .08, s * 0.06), F.d(1, 0, 0), F.d(0, 0.3 * s, s), 0.06, 0.2, PAL.wood);
+    } else if (kind === 'wall') {
+      hy = 0.45; hz = 0.32;
+      for (const s of [-1, 1]) paintRect(F.p(-HL, -0.4, s * hz), F.d(2 * HL, 0, 0), [0, 1.3, 0], F.d(0, 0, s), PAL.stone, 30, { hl: 0.2, hw: 0.11, tdir: F.d(1, 0, 0) });
+      paintRect(F.p(-HL, 0.92, -hz), F.d(2 * HL, 0, 0), F.d(0, 0, 2 * hz), [0, 1, 0], PAL.stone, 30, { hl: 0.2, hw: 0.11 });
+      for (const s of [-1, 1]) paintRect(F.p(s * HL, -0.4, -hz), F.d(0, 0, 2 * hz), [0, 1.3, 0], F.d(s, 0, 0), PAL.stone, 30, { hl: 0.2, hw: 0.11 });
+      solids.quad(F.p(-HL, -0.4, hz), F.p(-HL, 0.9, hz), F.p(HL, 0.9, hz), F.p(HL, -0.4, hz), under(PAL.stone));
+      solids.quad(F.p(HL, -0.4, -hz), F.p(HL, 0.9, -hz), F.p(-HL, 0.9, -hz), F.p(-HL, -0.4, -hz), under(PAL.stone));
+      solids.quad(F.p(-HL, 0.9, -hz), F.p(HL, 0.9, -hz), F.p(HL, 0.9, hz), F.p(-HL, 0.9, hz), under(PAL.stone));
+    } else {
+      hy = 0.38; hz = 0.38;
+      for (let i = 0; i < 520 * Q + 60; i++) { const lx = (rnd() * 2 - 1) * HL, a2 = rnd() * 6.28; const n = F.d(0, Math.sin(a2), Math.cos(a2)); W.push(add(F.p(lx, 0.38, 0), scl(n, 0.38)), F.d(1, 0, 0), n, 0.08, 0.32, PAL.trunk); }
+      for (const s of [-1, 1]) for (let i = 0; i < 30; i++) { const a2 = rnd() * 6.28, r = Math.sqrt(rnd()) * 0.36; W.push(F.p(s * (HL + 0.02), 0.38 + Math.sin(a2) * r, Math.cos(a2) * r), F.d(0, Math.cos(a2), -Math.sin(a2)), F.d(s, 0, 0), 0.05, 0.1, PAL.wood); }
+      // a broken branch stub
+      for (let i = 0; i < 20; i++) W.push(F.p(0.8, 0.75 + rnd() * 0.5, 0.1), [0.3, 1, 0], F.d(0, 0, 1), 0.06, 0.18, PAL.trunk);
+    }
+    const col = { c: [cx, gy + hy, cz], h: [HL, hy, hz], yaw, kind: 'obstacle', type: kind, angle: a };
+    colliders.push(col); obstacles.push(col);
+  }
+}
+
+// ---------------------------------------------------------- sky
+const VORT = [[40, 30, 0.34, 1.0], [72, 22, 0.2, 0.8], [-24, 36, 0.22, -0.9], [180, 32, 0.4, 1.0], [112, 55, 0.45, -0.6], [-100, 26, 0.3, 0.8]];
+const VORT_DIR = VORT.map(v => dirAE(v[0], v[1]));
+const MOON_DIR = dirAE(10, 16);
+function genSky() {
+  const COB = [0.13, 0.28, 0.68], ULT = [0.09, 0.12, 0.47], TEAL = [0.16, 0.5, 0.56], PALE = [0.62, 0.78, 0.88], WH = [0.82, 0.9, 0.96], YG = [0.78, 0.82, 0.5];
+  const mix3 = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+  const cnt = Math.round(62000 * Math.max(Q, 0.6));
+  for (let i = 0; i < cnt; i++) {
+    let d; do { d = norm([rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1]); } while (d[1] < -0.12);
+    const el = Math.max(d[1], 0);
+    let sw = 0;
+    VORT.forEach((v, k) => {
+      const c = VORT_DIR[k], a = Math.acos(clamp(dot(d, c), -1, 1)), f = Math.exp(-(a * a) / (v[2] * v[2]));
+      const e1 = norm(cross(c, [0, 1, 0])), e2 = cross(e1, c), th = Math.atan2(dot(d, e2), dot(d, e1));
+      sw += f * (0.5 + 0.5 * Math.sin(th * 2 + a / v[2] * 9));
+    });
+    sw += 0.35 * Math.max(0, Math.sin(Math.atan2(d[2], d[0]) * 2 + el * 7)) * Math.exp(-Math.pow((el - 0.45) / 0.15, 2));  // a luminous band
+    const r = rnd();
+    let c = r < 0.38 ? COB : r < 0.68 ? ULT : r < 0.88 ? TEAL : PALE;
+    if (el < 0.18 && rnd() < 0.5) c = mix3(TEAL, PALE, rnd() * .5);
+    c = mix3(c, rnd() < 0.5 ? PALE : WH, clamp(sw, 0, 1) * 0.65);
+    const md = Math.acos(clamp(dot(d, MOON_DIR), -1, 1));
+    c = mix3(c, YG, Math.exp(-Math.pow(md / 0.4, 2)) * 0.55);
+    c = mix3(c, ULT, (1 - Math.min(1, el * 3)) * 0 + Math.max(0, el - 0.7) * 0.8);
+    SKY.push(d, [1, 0, 0], scl(d, -1), rr(0.0042, 0.0068), rr(0.013, 0.03), P(scl(c, 1.12), scl(c, 0.78)), MAT.SKYFLOW, 0, 1, 0);
+  }
+  const ringStrokes = (center, rad, w, l, pal, mat, density = 1) => {
+    const e1 = norm(cross(center, [0, 1, 0])), e2 = cross(e1, center);
+    const n = Math.max(8, Math.round(2 * Math.PI * rad / (l * 1.2) * density));
+    for (let k = 0; k < n; k++) {
+      const a = k / n * 6.283 + rnd() * 0.05, rj = rad * (1 + (rnd() - .5) * 0.06);
+      const off = add(scl(e1, Math.cos(a) * rj), scl(e2, Math.sin(a) * rj));
+      const d = norm(add(center, off)), t = norm(add(scl(e1, -Math.sin(a)), scl(e2, Math.cos(a))));
+      SKY.push(d, t, scl(d, -1), w * rr(.8, 1.2), l * rr(.8, 1.2), pal, mat, 0, 1, 0);
+    }
+  };
+  const radial = (center, r0, r1, n, w, l, pal, mat) => {
+    const e1 = norm(cross(center, [0, 1, 0])), e2 = cross(e1, center);
+    for (let k = 0; k < n; k++) {
+      const a = rnd() * 6.283, r = lerp(r0, r1, Math.sqrt(rnd())), dir2 = add(scl(e1, Math.cos(a)), scl(e2, Math.sin(a)));
+      SKY.push(norm(add(center, scl(dir2, r))), dir2, scl(center, -1), w * rr(.8, 1.2), l * rr(.8, 1.3), pal, mat, 0, 1, 0);
+    }
+  };
+  // moon halo rings (outer first so inner ones paint over)
+  const halo = [[0.27, P([0.6, 0.75, 0.62], [0.35, 0.5, 0.55])], [0.22, P([0.85, 0.85, 0.5], [0.55, 0.6, 0.45])], [0.175, P([0.98, 0.82, 0.42], [0.75, 0.6, 0.3])], [0.135, P([1.0, 0.9, 0.55], [0.85, 0.68, 0.32])], [0.1, P([1.0, 0.78, 0.35], [0.92, 0.55, 0.2])]];
+  for (const [r, pal] of halo) for (let rep = 0; rep < 3; rep++) ringStrokes(MOON_DIR, r + (rep - 1) * 0.008, 0.007, 0.022, pal, MAT.SKYEMIT);
+  // moon disc: swirling gold-orange strokes
+  ringStrokes(MOON_DIR, 0.068, 0.008, 0.02, P([1.0, 0.72, 0.25], [0.95, 0.5, 0.12]), MAT.SKYEMIT, 1.4);
+  for (let rad = 0.058; rad > 0.005; rad -= 0.009) ringStrokes(MOON_DIR, rad, 0.008, 0.018, P([1.0, 0.8, 0.32], [1.0, 0.62, 0.18]), MAT.SKYEMIT, 1.3);
+  radial(MOON_DIR, 0, 0.03, 30, 0.008, 0.014, P([1.0, 0.9, 0.55], [1.0, 0.7, 0.3]), MAT.SKYEMIT);
+  // stars with radiating rays and halos
+  const STARS = [[55, 48], [85, 40], [18, 46], [-12, 30], [-42, 42], [100, 25], [132, 45], [160, 34], [-70, 22], [-122, 40], [205, 50], [252, 30], [300, 40], [28, 64], [62, 28], [-5, 58], [235, 62], [140, 70]];
+  for (const [az, el] of STARS) {
+    const c = dirAE(az, el), s = rr(0.8, 1.25);
+    ringStrokes(c, 0.05 * s, 0.006, 0.017, P([0.75, 0.85, 0.6], [0.45, 0.6, 0.6]), MAT.SKYEMIT, 0.9);
+    ringStrokes(c, 0.034 * s, 0.006, 0.015, P([1.0, 0.95, 0.65], [0.9, 0.8, 0.4]), MAT.SKYEMIT);
+    radial(c, 0.008 * s, 0.03 * s, 22, 0.0035, 0.01 * s, P([1.0, 0.86, 0.4], [1.0, 0.72, 0.25]), MAT.SKYEMIT);
+    radial(c, 0, 0.012 * s, 14, 0.005, 0.008, P([1.0, 0.98, 0.8], [1.0, 0.85, 0.5]), MAT.SKYEMIT);
+  }
+  for (let i = 0; i < 260; i++) { let d; do { d = norm([rnd() * 2 - 1, rnd(), rnd() * 2 - 1]); } while (d[1] < 0.12); const t = norm(cross(d, [0, 1, 0])); SKY.push(d, t, scl(d, -1), 0.0025, 0.006, P([1, 0.95, 0.7], [0.9, 0.8, 0.5]), MAT.SKYEMIT); SKY.push(d, cross(d, t), scl(d, -1), 0.0025, 0.006, P([1, 0.95, 0.7], [0.9, 0.8, 0.5]), MAT.SKYEMIT); }
+}
+
+// ===================================================== KNIGHT & HORSE (local parts)
+function part() { return new StrokeSet(2048); }
+function ellip(set, c, r, cnt, pal, opts = {}) {
+  const along = opts.along || [0, 0, 1], mat = opts.mat || 0;
+  for (let i = 0; i < cnt; i++) {
+    const u = rnd() * 2 - 1, a = rnd() * 6.283, s = Math.sqrt(1 - u * u), d = [s * Math.cos(a), u, s * Math.sin(a)];
+    if (opts.filter && !opts.filter(d)) continue;
+    let p = [c[0] + d[0] * r[0], c[1] + d[1] * r[1], c[2] + d[2] * r[2]];
+    if (opts.xf) p = opts.xf(p);
+    let n = norm([d[0] / r[0], d[1] / r[1], d[2] / r[2]]); if (opts.xfn) n = opts.xfn(n);
+    const t = onPlane(add(along, [(rnd() - .5) * .5, (rnd() - .5) * .5, (rnd() - .5) * .5]), n);
+    set.push(p, t, n, (opts.hw || 0.035) * rr(.8, 1.2), (opts.hl || 0.09) * rr(.8, 1.2), pal, mat, opts.tw ? opts.tw(p) : 0, 1, 0.08);
+  }
+}
+function tube(set, a, b, ra, rb, cnt, pal, opts = {}) {
+  const ax = sub(b, a), L = len(ax), z = norm(ax), x = norm(cross(z, Math.abs(z[1]) < .9 ? [0, 1, 0] : [1, 0, 0])), y = cross(z, x);
+  for (let i = 0; i < cnt; i++) {
+    const t = rnd(), ang = rnd() * 6.283, r = lerp(ra, rb, t);
+    const n = add(scl(x, Math.cos(ang)), scl(y, Math.sin(ang)));
+    const p = add(add(a, scl(ax, t)), scl(n, r));
+    const tt = onPlane(add(opts.around ? cross(z, n) : z, [(rnd() - .5) * .3, (rnd() - .5) * .3, (rnd() - .5) * .3]), n);
+    set.push(p, tt, n, (opts.hw || 0.03) * rr(.8, 1.2), (opts.hl || 0.08) * rr(.8, 1.2), pal, opts.mat || 0, opts.tw ? opts.tw(t) : 0, 1, 0.08);
+  }
+}
+function line(set, a, b, w, pal, step = 0.06) { const L = len(sub(b, a)), t = norm(sub(b, a)); const n = norm(cross(t, [1, 0, 0])); for (let s = 0; s < L; s += step) set.push(add(a, scl(t, s)), t, n, w, step * 0.8, pal); }
+
+const HORSE = {};
+function buildRider() {
+  const K = Math.max(0.6, Math.sqrt(Q));       // characters stay dense even on phones
+  const N = n => Math.round(n * K);
+  // body (root frame: origin on the ground under the horse centre, +z forward)
+  const body = part();
+  ellip(body, [0, 1.3, 0], [0.4, 0.43, 0.97], N(2600), PAL.horse, { along: [0, 0, 1] });
+  ellip(body, [0, 1.38, 0.62], [0.36, 0.42, 0.42], N(700), PAL.horse);              // chest
+  ellip(body, [0, 1.36, -0.66], [0.39, 0.42, 0.42], N(700), PAL.horse);             // rump
+  tube(body, [0, 1.5, 0.78], [0, 2.08, 1.2], 0.24, 0.15, N(900), PAL.horse);        // neck
+  const hd = norm([0, -0.62, 0.78]);
+  ellip(body, [0, 2.06, 1.42], [0.13, 0.15, 0.17], N(260), PAL.horse);               // skull
+  tube(body, [0, 2.04, 1.45], add([0, 2.04, 1.45], scl(hd, 0.42)), 0.13, 0.09, N(380), PAL.horse); // muzzle
+  ellip(body, add([0, 2.04, 1.45], scl(hd, 0.44)), [0.085, 0.08, 0.08], N(80), PAL.horseDark);
+  for (const s of [-1, 1]) tube(body, [s * 0.07, 2.18, 1.38], [s * 0.09, 2.36, 1.32], 0.04, 0.01, 30, PAL.horse);
+  for (const s of [-1, 1]) for (let i = 0; i < 6; i++) body.push([s * 0.12, 2.1, 1.55], [0, 0, 1], [s, 0, 0], 0.025, 0.03, P([0.1, 0.08, 0.08], [0.02, 0.02, 0.02]));
+  // mane & tail
+  for (let i = 0; i < N(260); i++) { const t = rnd(); const p = add(lerp3([0, 1.72, 0.74], [0, 2.26, 1.28], t), [(rnd() - .5) * 0.12, 0.04 + rnd() * 0.06, -0.04]); body.push(p, norm([(rnd() - .5) * .4, -1, -0.4]), [rnd() < .5 ? -1 : 1, 0.2, 0], 0.03, 0.14, PAL.horseDark, MAT.CLOTH, 0.4); }
+  for (let i = 0; i < N(320); i++) { const t = rnd(); const p = add(lerp3([0, 1.5, -0.98], [0, 0.72, -1.3], t), [(rnd() - .5) * 0.18 * (0.4 + t), (rnd() - .5) * .1, (rnd() - .5) * .12]); body.push(p, norm([(rnd() - .5) * .3, -1, -0.45 + t * .2]), norm([rnd() - .5, 0, rnd() - .5]), 0.035, 0.16, PAL.horseDark, MAT.CLOTH, 0.3 + t); }
+  // saddle, blanket, girth, stirrups
+  ellip(body, [0, 1.72, -0.05], [0.42, 0.06, 0.5], N(420), PAL.blanket, { filter: d => d[1] > 0 });
+  ellip(body, [0, 1.78, -0.05], [0.3, 0.1, 0.36], N(420), PAL.saddle, { filter: d => d[1] > -0.2 });
+  ellip(body, [0, 1.86, 0.25], [0.1, 0.08, 0.08], 60, PAL.saddle);
+  for (const s of [-1, 1]) { tube(body, [s * 0.4, 1.7, 0.05], [s * 0.4, 1.0, 0.05], 0.015, 0.015, 40, PAL.saddle, { hw: 0.02 }); tube(body, [s * 0.3, 1.74, 0.1], [s * 0.36, 1.25, 0.15], 0.012, 0.012, 30, PAL.saddle, { hw: 0.015 }); tube(body, [s * 0.32, 1.22, 0.1], [s * 0.32, 1.22, 0.24], 0.03, 0.03, 20, PAL.metal); }
+  tube(body, [-0.42, 1.0, 0.05], [0.42, 1.0, 0.05], 0.03, 0.03, 50, PAL.saddle, { around: true });
+  // bridle & reins (to the rider's hands)
+  const bit = add([0, 2.04, 1.45], scl(hd, 0.36));
+  for (const s of [-1, 1]) { line(body, add(bit, [s * 0.1, 0, 0]), [s * 0.11, 2.2, 1.36], 0.012, PAL.saddle, 0.04); line(body, add(bit, [s * 0.1, 0, 0]), [s * 0.12, 2.0, 0.42], 0.013, PAL.saddle, 0.05); }
+  HORSE.body = uploadPlain(body);
+  // legs: upper (pivot at hip/shoulder) and lower (pivot at knee/hock)
+  HORSE.legs = [];
+  const hips = [[0.22, 1.18, 0.66, 'F'], [-0.22, 1.18, 0.66, 'F'], [0.22, 1.2, -0.68, 'H'], [-0.22, 1.2, -0.68, 'H']];
+  for (const [x, y, z, kind] of hips) {
+    const up = part(), lo = part();
+    tube(up, [0, 0.1, 0], [0, -0.56, kind === 'H' ? -0.05 : 0.02], kind === 'H' ? 0.16 : 0.13, 0.08, N(420), PAL.horse);
+    tube(lo, [0, 0, 0], [0, -0.5, 0.02], 0.065, 0.055, N(240), PAL.horse);
+    tube(lo, [0, -0.44, 0.02], [0, -0.53, 0.04], 0.08, 0.075, N(80), PAL.horseDark, { around: true });   // fetlock & hoof
+    ellip(lo, [0, -0.58, 0.05], [0.07, 0.04, 0.08], 40, P([0.18, 0.15, 0.14], [0.04, 0.04, 0.04]));
+    HORSE.legs.push({ up: uploadPlain(up), lo: uploadPlain(lo), hip: [x, y, z], knee: [0, -0.56, kind === 'H' ? -0.05 : 0.02], kind });
+  }
+  // rider (seated, in horse frame)
+  const rd = part();
+  ellip(rd, [0, 2.24, -0.02], [0.2, 0.33, 0.15], N(700), PAL.tunic, { along: [0, 1, 0] });
+  ellip(rd, [0, 1.92, -0.05], [0.22, 0.12, 0.2], N(220), PAL.tunic);
+  ellip(rd, [0, 2.73, 0.03], [0.11, 0.13, 0.11], N(220), PAL.skin);
+  ellip(rd, [0, 2.84, 0.03], [0.44, 0.03, 0.44], N(700), PAL.hat, { along: [1, 0, 0] });   // wide brim
+  tube(rd, [0, 2.84, 0.03], [0, 3.04, 0.03], 0.15, 0.13, N(220), PAL.hat, { around: true });
+  ellip(rd, [0, 3.04, 0.03], [0.13, 0.03, 0.13], 40, PAL.hat, { filter: d => d[1] > 0 });
+  for (let i = 0; i < 50; i++) { const a = rnd() * 6.28; rd.push([Math.cos(a) * 0.16, 2.88, 0.03 + Math.sin(a) * 0.16], [-Math.sin(a), 0, Math.cos(a)], [Math.cos(a), 0, Math.sin(a)], 0.02, 0.05, P([0.75, 0.2, 0.15], [0.3, 0.05, 0.05])); }   // hat band
+  for (const s of [-1, 1]) {
+    tube(rd, [s * 0.12, 1.9, 0.0], [s * 0.36, 1.72, 0.3], 0.09, 0.075, N(200), PAL.tunic);          // thigh
+    tube(rd, [s * 0.36, 1.72, 0.3], [s * 0.36, 1.26, 0.16], 0.07, 0.06, N(180), PAL.boot);        // shin + boot
+    ellip(rd, [s * 0.36, 1.22, 0.22], [0.06, 0.05, 0.12], 40, PAL.boot);
+  }
+  tube(rd, [0.2, 2.46, 0.0], [0.24, 2.18, 0.2], 0.06, 0.05, N(120), PAL.tunic);   // right arm to reins
+  tube(rd, [0.24, 2.18, 0.2], [0.13, 2.02, 0.42], 0.05, 0.045, N(90), PAL.tunic);
+  ellip(rd, [0.12, 2.0, 0.44], [0.045, 0.045, 0.05], 30, PAL.skin);
+  tube(rd, [-0.2, 2.46, 0.0], [-0.42, 2.28, 0.12], 0.06, 0.05, N(120), PAL.tunic); // left arm holding the lantern
+  tube(rd, [-0.42, 2.28, 0.12], [-0.56, 2.12, 0.3], 0.05, 0.045, N(90), PAL.tunic);
+  ellip(rd, [-0.57, 2.1, 0.31], [0.045, 0.045, 0.05], 30, PAL.skin);
+  HORSE.rider = uploadPlain(rd);
+  // cape: a sheet hanging from the shoulders, fluttering (tw = distance from the collar)
+  const cp = part();
+  for (let i = 0; i < N(1500); i++) {
+    const u = rnd() * 2 - 1, v = rnd();
+    const wdt = 0.26 + v * 0.36, x = u * wdt, y = 2.52 - v * 0.95, z = -0.16 - v * 0.32 - (1 - u * u) * 0.08 - v * v * 0.1;
+    const n = norm([u * 0.5, 0.15, -1]);
+    cp.push([x, y, z], norm([u * 0.15, -1, -0.2]), n, 0.045, 0.12, PAL.cape, MAT.CLOTH, v);
+    if (rnd() < 0.5) cp.push([x, y, z + 0.015], norm([u * 0.15, -1, -0.2]), scl(n, -1), 0.045, 0.12, P([0.55, 0.42, 0.25], [0.15, 0.1, 0.06]), MAT.CLOTH, v);
+  }
+  for (let i = 0; i < N(260); i++) { const a = rr(-2.2, 2.2); cp.push([Math.sin(a) * 0.22, 2.5 + rnd() * 0.05, -0.02 + Math.cos(a) * 0.17 - 0.03], [Math.cos(a), 0, -Math.sin(a)], [Math.sin(a), 0.4, Math.cos(a)], 0.04, 0.08, PAL.cape, MAT.CLOTH, 0.05); }
+  HORSE.cape = uploadPlain(cp);
+  // lantern (pivot at the hand), emissive core
+  const ln = part();
+  line(ln, [0, 0, 0], [0, -0.14, 0], 0.012, PAL.metal, 0.03);
+  for (let i = 0; i < 160; i++) { const a = rnd() * 6.28, y = -0.17 - rnd() * 0.2; ln.push([Math.cos(a) * 0.075, y, Math.sin(a) * 0.075], [0, 1, 0], [Math.cos(a), 0, Math.sin(a)], 0.025, 0.045, PAL.lantern, MAT.EMIT); }
+  for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + Math.PI / 4; line(ln, [Math.cos(a) * 0.085, -0.16, Math.sin(a) * 0.085], [Math.cos(a) * 0.085, -0.38, Math.sin(a) * 0.085], 0.012, PAL.metal, 0.03); }
+  ellip(ln, [0, -0.15, 0], [0.1, 0.035, 0.1], 50, PAL.metal);
+  ellip(ln, [0, -0.39, 0], [0.09, 0.02, 0.09], 30, PAL.metal);
+  for (let i = 0; i < 50; i++) { const a = rnd() * 6.28; ln.push([Math.cos(a) * 0.03, -0.27 + (rnd() - .5) * .08, Math.sin(a) * 0.03], [0, 1, 0], [Math.cos(a), 0, Math.sin(a)], 0.02, 0.035, P([1, 1, 0.85], [1, 0.9, 0.5]), MAT.EMIT); }
+  HORSE.lantern = uploadPlain(ln);
+}
+function lerp3(a, b, t) { return [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)]; }
+
+// ===================================================== PHYSICS
+const BALL_R = 0.7, GRAV = 22, JUMP_V = 8.6, WORLD_LIMIT = 410;
+class BuiltinPhysics {
+  constructor(start) { this.name = '內建簡易物理'; this.pos = start.slice(); this.vel = [0, 0, 0]; this.grounded = false; }
+  groundAt(x, z, footY) {
+    let g = H(x, z);
+    if (Math.abs(x) < 2.6) { const d = deckY(z); if (d > g && footY > d - 0.9) g = d; }
+    return g;
+  }
+  step(dt, want, jump) {
+    const p = this.pos, v = this.vel;
+    v[0] = want[0]; v[2] = want[2]; v[1] -= GRAV * dt;
+    if (jump && this.grounded) { v[1] = JUMP_V; this.grounded = false; }
+    let nx = p[0] + v[0] * dt, ny = p[1] + v[1] * dt, nz = p[2] + v[2] * dt;
+    let support = this.groundAt(nx, nz, ny - BALL_R);
+    for (const c of colliders) {
+      if (c.kind === 'bridge') continue;
+      const dx = nx - c.c[0], dz = nz - c.c[2]; if (dx * dx + dz * dz > 100) continue;
+      const cs = Math.cos(c.yaw), sn = Math.sin(c.yaw);
+      const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
+      const ex = c.h[0] + BALL_R * 0.85, ez = c.h[2] + BALL_R * 0.85;
+      if (Math.abs(lx) >= ex || Math.abs(lz) >= ez) continue;
+      const top = c.c[1] + c.h[1];
+      if (p[1] - BALL_R >= top - 0.12) { support = Math.max(support, top); continue; }   // landing on top
+      if (ny - BALL_R > top) continue;
+      const px = ex - Math.abs(lx), pz = ez - Math.abs(lz);
+      let ox = 0, oz = 0; if (px < pz) ox = Math.sign(lx) * px; else oz = Math.sign(lz) * pz;
+      nx += ox * cs + oz * sn; nz += -ox * sn + oz * cs;     // local -> world (inverse rotation)
+    }
+    const r = Math.hypot(nx, nz); if (r > WORLD_LIMIT) { nx *= WORLD_LIMIT / r; nz *= WORLD_LIMIT / r; }
+    const floor = support + BALL_R;
+    if (ny <= floor || (this.grounded && v[1] <= 0 && ny - floor < 0.35)) { ny = floor; if (v[1] < 0) v[1] = 0; this.grounded = true; }
+    else this.grounded = false;
+    p[0] = nx; p[1] = ny; p[2] = nz;
+  }
+}
+class RapierPhysics {
+  constructor(R, start) {
+    this.R = R; this.name = 'Rapier';
+    const world = this.world = new R.World({ x: 0, y: -GRAV, z: 0 });
+    // terrain trimesh
+    const S0 = 440, step = 5.5, n = Math.round(2 * S0 / step) + 1, verts = new Float32Array(n * n * 3), idx = new Uint32Array((n - 1) * (n - 1) * 6);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const x = -S0 + i * step, z = -S0 + j * step, k = (j * n + i) * 3; verts[k] = x; verts[k + 1] = H(x, z); verts[k + 2] = z; }
+    let q = 0; for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) { const a = j * n + i, b = a + 1, c = a + n, d = c + 1; idx[q++] = a; idx[q++] = c; idx[q++] = b; idx[q++] = b; idx[q++] = c; idx[q++] = d; }
+    world.createCollider(R.ColliderDesc.trimesh(verts, idx).setFriction(0.0));
+    for (const c of colliders) {
+      const qy = [0, Math.sin(c.yaw / 2), 0, Math.cos(c.yaw / 2)], p = c.pitch || 0, qx = [Math.sin(p / 2), 0, 0, Math.cos(p / 2)];
+      const qq = qmul(qy, qx);
+      world.createCollider(R.ColliderDesc.cuboid(c.h[0], c.h[1], c.h[2]).setTranslation(c.c[0], c.c[1], c.c[2]).setRotation({ x: qq[0], y: qq[1], z: qq[2], w: qq[3] }).setFriction(0.0));
+    }
+    this.body = world.createRigidBody(R.RigidBodyDesc.dynamic().setTranslation(start[0], start[1], start[2]).lockRotations().setCcdEnabled(true));
+    this.col = world.createCollider(R.ColliderDesc.ball(BALL_R).setFriction(0.0).setRestitution(0.0).setDensity(1.0), this.body);
+    this.pos = start.slice(); this.vel = [0, 0, 0]; this.grounded = false; this.ray = new R.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
+  }
+  step(dt, want, jump) {
+    const b = this.body, t = b.translation(), lv = b.linvel();
+    this.ray.origin = { x: t.x, y: t.y, z: t.z };
+    const hit = this.world.castRay(this.ray, BALL_R + 0.35, true, undefined, undefined, undefined, b);
+    this.grounded = !!hit && hit.timeOfImpact < BALL_R + 0.25;
+    let vy = lv.y;
+    if (jump && this.grounded) vy = JUMP_V;
+    else if (this.grounded && vy < 0.5) vy = Math.min(vy, -1.5);   // stick to slopes
+    b.setLinvel({ x: want[0], y: vy, z: want[2] }, true);
+    this.world.timestep = dt; this.world.step();
+    let p = b.translation(); const r = Math.hypot(p.x, p.z);
+    if (r > WORLD_LIMIT) { b.setTranslation({ x: p.x * WORLD_LIMIT / r, y: p.y, z: p.z * WORLD_LIMIT / r }, true); p = b.translation(); }
+    if (p.y < H(p.x, p.z) - 3) b.setTranslation({ x: p.x, y: H(p.x, p.z) + 2, z: p.z }, true);   // safety net
+    p = b.translation(); this.pos = [p.x, p.y, p.z]; const v = b.linvel(); this.vel = [v.x, v.y, v.z];
+  }
+}
+function qmul(a, b) { return [a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1], a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0], a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3], a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]]; }
+async function loadRapier() {
+  if (params.has('builtin')) throw new Error('forced builtin');
+  let lastErr;
+  for (const url of RAPIER_URLS) {
+    try {
+      const mod = await Promise.race([import(url), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + url)), 7000))]);
+      const R = mod.default || mod; await R.init(); return R;
+    } catch (e) { lastErr = e; console.warn('Rapier load failed:', url, e.message); }
+  }
+  throw lastErr;
+}
+
+// ===================================================== INPUT
+const keys = new Set();
+const input = { joy: [0, 0], jumpReq: false, dragging: false, lastUserCam: -1e9 };
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase(); keys.add(k);
+  if (k === ' ') { input.jumpReq = true; e.preventDefault(); }
+  if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) setAuto(false);
+  if (k === 'p') setAuto(!state.auto);
+  if (k === 't') setTour(!state.tour);
+  if (k === 'escape') setTour(false);
+});
+addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+addEventListener('blur', () => keys.clear());
+const camPtrs = new Map();
+let pinchD = 0;
+const capture = (el, id) => { try { el.setPointerCapture(id); } catch (_) { } };
+canvas.addEventListener('pointerdown', e => { capture(canvas, e.pointerId); camPtrs.set(e.pointerId, [e.clientX, e.clientY]); if (camPtrs.size === 2) { const [a, b] = [...camPtrs.values()]; pinchD = Math.hypot(a[0] - b[0], a[1] - b[1]); } });
+canvas.addEventListener('pointermove', e => {
+  if (!camPtrs.has(e.pointerId)) return;
+  const prev = camPtrs.get(e.pointerId); const dx = e.clientX - prev[0], dy = e.clientY - prev[1];
+  camPtrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (camPtrs.size === 1) { cam.yaw += dx * 0.005; cam.pitch = clamp(cam.pitch + dy * 0.004, -0.12, 1.25); input.lastUserCam = performance.now(); if (state.tour) setTour(false); }
+  else if (camPtrs.size === 2) { const [a, b] = [...camPtrs.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); if (pinchD > 0) cam.dist = clamp(cam.dist * pinchD / d, 3.5, 45); pinchD = d; }
+});
+const endPtr = e => { camPtrs.delete(e.pointerId); pinchD = 0; };
+canvas.addEventListener('pointerup', endPtr); canvas.addEventListener('pointercancel', endPtr);
+canvas.addEventListener('wheel', e => { cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 3.5, 45); e.preventDefault(); }, { passive: false });
+// virtual joystick
+const joy = $('joy'), knob = $('knob'); let joyId = null;
+const joyMove = e => { const r = joy.getBoundingClientRect(); let x = (e.clientX - r.left - r.width / 2) / (r.width / 2), y = (e.clientY - r.top - r.height / 2) / (r.height / 2); const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; } input.joy = [x, y]; knob.style.transform = `translate(${x * 40}px,${y * 40}px)`; if (l > 0.2) setAuto(false); };
+joy.addEventListener('pointerdown', e => { joyId = e.pointerId; capture(joy, e.pointerId); joyMove(e); e.preventDefault(); });
+joy.addEventListener('pointermove', e => { if (e.pointerId === joyId) joyMove(e); });
+const joyEnd = e => { if (e.pointerId !== joyId) return; joyId = null; input.joy = [0, 0]; knob.style.transform = ''; };
+joy.addEventListener('pointerup', joyEnd); joy.addEventListener('pointercancel', joyEnd);
+$('jumpBtn').addEventListener('pointerdown', e => { input.jumpReq = true; e.preventDefault(); });
+
+// ===================================================== STATE / CAMERA / TOUR
+const state = { auto: true, tour: false, tourT: 0, scale: 1, fps: 60, drawn: 0, physics: null, ready: false, time: 0 };
+const cam = { yaw: 0, pitch: 0.2, dist: 8.5, pos: [0, 10, 0], target: [0, 0, 0], fov: 62 };
+const rider = { heading: 0, speed: 0, gait: 0, prevPos: null, pos: [0, 0, 0], air: 0, swing: 0, swingV: 0, lastJump: 0 };
+function setAuto(on) { state.auto = on; $('bAuto').classList.toggle('on', on); }
+function setTour(on) { state.tour = on; state.tourT = 0; $('bTour').classList.toggle('on', on); document.body.classList.toggle('tour', on); }
+$('bAuto').onclick = () => setAuto(!state.auto);
+$('bTour').onclick = () => setTour(!state.tour);
+$('bHelp').onclick = () => { const h = $('help'); h.style.display = h.style.display === 'block' ? 'none' : 'block'; };
+$('help').innerHTML = IS_TOUCH
+  ? '左下搖桿：騎乘（推到底奔跑）<br>右下「跳」：跳躍<br>單指拖曳：轉視角<br>雙指開合：縮放<br>「自動騎行」：沿環形小徑自動騎並自動跳過障礙'
+  : 'W A S D：騎乘　Shift：奔跑<br>空白鍵：跳躍<br>滑鼠拖曳：轉視角　滾輪：縮放<br>P：自動騎行　T：全景巡遊　Esc：離開巡遊';
+const TOUR = [
+  [[180, 95, -230], [0, 8, 0]], [[60, 14, -112], [0, 3, -145]], [[22, 7, -128], [0, 2, -146]],
+  [[-180, 16, -128], [-229, 14, -150]], [[-205, 40, -40], [-170, 8, 120]], [[-118, 22, 108], [-180, 10, 172]],
+  [[-60, 4, 34], [10, 2, 0]], [[18, 3.5, 40], [-30, 2.5, 10]], [[96, 13, -66], [150, 11, -35]],
+  [[95, 7, 30], [190, 3, 120]], [[0, 70, 160], [0, 50, 700]], [[-120, 60, -10], [300, 30, -500]],
+];
+function catmull(p0, p1, p2, p3, t) { const t2 = t * t, t3 = t2 * t; return p1.map((_, i) => 0.5 * (2 * p1[i] + (-p0[i] + p2[i]) * t + (2 * p0[i] - 5 * p1[i] + 4 * p2[i] - p3[i]) * t2 + (-p0[i] + 3 * p1[i] - 3 * p2[i] + p3[i]) * t3)); }
+function tourPose(T) {
+  const SEGD = 8.5, n = TOUR.length, f = (T / SEGD) % n, i = Math.floor(f), t = f - i;
+  const g = k => TOUR[((k % n) + n) % n];
+  const st = t * t * (3 - 2 * t) * 0.35 + t * 0.65;
+  const pos = catmull(g(i - 1)[0], g(i)[0], g(i + 1)[0], g(i + 2)[0], st), tgt = catmull(g(i - 1)[1], g(i)[1], g(i + 1)[1], g(i + 2)[1], st);
+  pos[1] = Math.max(pos[1], H(pos[0], pos[2]) + 2.5);
+  return [pos, tgt];
+}
+
+// ===================================================== RENDER SETUP
+let solidsReady = false, Wset, WATERset, MIRRORset;
+const lightLP = new Float32Array(32), lightLC = new Float32Array(32);
+const vortU = new Float32Array(24), vortS = new Float32Array(6);
+VORT.forEach((v, i) => { const d = VORT_DIR[i]; vortU.set([d[0], d[1], d[2], v[2]], i * 4); vortS[i] = v[3]; });
+const MOON_LIGHT = norm(add(MOON_DIR, [0, 1.1, 0]));
+const GRASS = { S: 0.2, R: 22 }; GRASS.side = Math.ceil(GRASS.R * 2 / GRASS.S); GRASS.count = Math.round(GRASS.side * GRASS.side);
+const grassVAO = gl.createVertexArray(); gl.bindVertexArray(grassVAO); bindCorner(); gl.bindVertexArray(null);
+
+function setCommon(prog, VP, view) {
+  const u = prog.u;
+  gl.useProgram(prog.p);
+  gl.uniformMatrix4fv(u.uVP, false, VP);
+  if (u.uCam) gl.uniform3fv(u.uCam, view.eye);
+  if (u.uTime) gl.uniform1f(u.uTime, state.time);
+  if (u.uRes) gl.uniform2f(u.uRes, canvas.width, canvas.height);
+  if (u.uProjY) gl.uniform1f(u.uProjY, view.projY);
+  const k = canvas.height / Math.max(1, canvas.clientHeight);       // device px per CSS px at current scale
+  if (u.uPxMin) gl.uniform1f(u.uPxMin, 2.2 * k);
+  if (u.uPxMax) gl.uniform1f(u.uPxMax, 100 * k);
+  if (u.uPxLod) gl.uniform1f(u.uPxLod, (IS_TOUCH ? 9 : 7) * k);
+  if (u.uSkyPxMax) gl.uniform1f(u.uSkyPxMax, 90 * k);
+  gl.uniform3fv(u.uMoonDir, MOON_LIGHT);
+  gl.uniform3f(u.uMoonTint, 0.66, 0.8, 1.12);
+  gl.uniform3f(u.uFogCol, 0.13, 0.2, 0.36);
+  gl.uniform1f(u.uFogD, 0.0006);
+  gl.uniform4fv(u.uLP, lightLP); gl.uniform4fv(u.uLC, lightLC);
+  if (u.uVort) { gl.uniform4fv(u.uVort, vortU); gl.uniform1fv(u.uVortS, vortS); }
+  if (u.uMoonSky) gl.uniform3fv(u.uMoonSky, MOON_DIR);
+  if (u.uAlphaCut) gl.uniform1f(u.uAlphaCut, HAS_AA ? 0.02 : 0.5);
+  if (u.uAlphaMul) gl.uniform1f(u.uAlphaMul, 1);
+  if (u.uModel) gl.uniformMatrix4fv(u.uModel, false, M4.id());
+  if (u.uSpeedF) gl.uniform1f(u.uSpeedF, clamp(rider.speed / 11, 0, 1));
+}
+function frustumPlanes(m) {
+  const r = i => [m[i], m[4 + i], m[8 + i], m[12 + i]];
+  const r0 = r(0), r1 = r(1), r2 = r(2), r3 = r(3);
+  return [add4(r3, r0), sub4(r3, r0), add4(r3, r1), sub4(r3, r1), add4(r3, r2), sub4(r3, r2)];
+}
+const add4 = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]], sub4 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2], a[3] - b[3]];
+function drawChunks(set, planes, view) {
+  const prog = progWorld, u = prog.u, e = view.eye; let drawn = 0;
+  const ppm0 = canvas.height * 0.5 * view.projY, k = canvas.height / Math.max(1, canvas.clientHeight), pxLod = (IS_TOUCH ? 9 : 7) * k;
+  for (const c of set.chunks) {
+    const pad = c.maxL + 1.5, mn = c.mn, mx = c.mx;
+    let vis = true;
+    for (const p of planes) { const x = p[0] > 0 ? mx[0] + pad : mn[0] - pad, y = p[1] > 0 ? mx[1] + pad : mn[1] - pad, z = p[2] > 0 ? mx[2] + pad : mn[2] - pad; if (p[0] * x + p[1] * y + p[2] * z + p[3] < 0) { vis = false; break; } }
+    if (!vis) continue;
+    const dx = Math.max(mn[0] - e[0], 0, e[0] - mx[0]), dy = Math.max(mn[1] - e[1], 0, e[1] - mx[1]), dz = Math.max(mn[2] - e[2], 0, e[2] - mx[2]);
+    const dmin = Math.max(Math.hypot(dx, dy, dz), 0.3);
+    const natPx = c.maxL * 2 * ppm0 / dmin, keep = Math.min(1, (natPx * natPx) / (pxLod * pxLod));
+    const cnt = Math.min(c.count, Math.ceil(c.count * keep) + 4);
+    gl.uniform1f(u.uRankDiv, 1 / c.count);
+    gl.bindVertexArray(c.vao);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, cnt);
+    drawn += cnt;
+  }
+  return drawn;
+}
+function drawPart(pt, model) { gl.uniformMatrix4fv(progWorld.u.uModel, false, model); gl.uniform1f(progWorld.u.uRankDiv, 0); gl.bindVertexArray(pt.vao); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, pt.count); return pt.count; }
+
+// ===================================================== SIM
+const STEP = 1 / 60; let acc = 0;
+function simStep(dt) {
+  const ph = state.physics, p = ph.pos;
+  let want = [0, 0, 0], jump = false, speedT = 0;
+  const fwdH = [Math.sin(rider.heading), 0, Math.cos(rider.heading)];
+  if (state.auto) {
+    const a = Math.atan2(p[2], p[0]), ta = a + 11 / RING_R;
+    const tgt = [Math.cos(ta) * RING_R, 0, Math.sin(ta) * RING_R];
+    const d = norm([tgt[0] - p[0], 0, tgt[2] - p[2]]);
+    steer(d, dt, 1.6); speedT = 8.2;
+    // auto-jump when an obstacle enters the take-off window
+    const v = Math.max(rider.speed, 3);
+    for (const o of obstacles) {
+      const rel = [o.c[0] - p[0], 0, o.c[2] - p[2]], along = dot(rel, fwdH), lat = Math.abs(rel[0] * fwdH[2] - rel[2] * fwdH[0]);
+      if (along > 0 && lat < 2.4 && along - o.h[2] < 0.39 * v + 0.15 && along - o.h[2] > 0.2 * v - 0.6) { jump = true; }
+    }
+  } else {
+    let ix = 0, iz = 0;
+    if (keys.has('w') || keys.has('arrowup')) iz += 1; if (keys.has('s') || keys.has('arrowdown')) iz -= 1;
+    if (keys.has('a') || keys.has('arrowleft')) ix -= 1; if (keys.has('d') || keys.has('arrowright')) ix += 1;
+    let mag = Math.min(1, Math.hypot(ix, iz)); let run = keys.has('shift');
+    if (Math.hypot(input.joy[0], input.joy[1]) > 0.12) { ix = input.joy[0]; iz = -input.joy[1]; mag = Math.min(1, Math.hypot(ix, iz)); run = mag > 0.92; }
+    if (mag > 0.01) {
+      const cf = [Math.sin(cam.yaw), 0, Math.cos(cam.yaw)], cr = [-cf[2], 0, cf[0]];
+      const d = norm(add(scl(cf, iz), scl(cr, -ix)));
+      steer(d, dt, 3.2); speedT = (run ? 11.5 : 6.2) * mag;
+    }
+  }
+  if (input.jumpReq) { jump = true; input.jumpReq = false; }
+  rider.speed += clamp(speedT - rider.speed, -14 * dt, 7 * dt);
+  const f = [Math.sin(rider.heading), 0, Math.cos(rider.heading)];
+  want = [f[0] * rider.speed, 0, f[2] * rider.speed];
+  if (jump && ph.grounded) rider.lastJump = state.time;
+  ph.step(dt, want, jump);
+}
+function steer(d, dt, rate) {
+  const target = Math.atan2(d[0], d[2]); let diff = target - rider.heading;
+  diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+  rider.heading += clamp(diff, -rate * dt, rate * dt);
+}
+
+// ===================================================== FRAME
+let lastT = performance.now(), fpsAcc = 0, fpsN = 0, resTimer = 0, goodTime = 0;
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(canvas.clientWidth * dpr * state.scale)), h = Math.max(1, Math.round(canvas.clientHeight * dpr * state.scale));
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+}
+function adaptResolution(dt) {
+  fpsAcc += dt; fpsN++;
+  if (fpsAcc < 0.5) return;
+  const fps = fpsN / fpsAcc; state.fps = fps; fpsAcc = 0; fpsN = 0;
+  if (FIXED_RES) return;
+  if (fps < 45 && state.scale > 0.34) { state.scale = Math.max(0.33, state.scale * (fps < 25 ? 0.75 : 0.87)); goodTime = 0; }
+  else if (fps > 57) { goodTime += 0.5; if (goodTime > 2.5 && state.scale < 1) { state.scale = Math.min(1, state.scale * 1.08); goodTime = 0; } }
+  else goodTime = 0;
+}
+function frame(now) {
+  requestAnimationFrame(frame);
+  const rawDt = Math.max(1e-4, (now - lastT) / 1000); let dt = Math.min(0.1, rawDt); lastT = now;
+  if (!state.ready) return;
+  state.time += dt;
+  adaptResolution(rawDt);
+  resize();
+  // ---- simulation (fixed step)
+  acc += dt; let steps = 0;
+  while (acc >= STEP && steps < 6) { rider.prevPos = state.physics.pos.slice(); simStep(STEP); acc -= STEP; steps++; }
+  if (steps === 6) acc = 0;
+  const ph = state.physics; const a = clamp(acc / STEP, 0, 1);
+  const bp = rider.prevPos ? lerp3(rider.prevPos, ph.pos, a) : ph.pos;
+  rider.pos = [bp[0], bp[1] - BALL_R, bp[2]];
+  const horiz = Math.hypot(ph.vel[0], ph.vel[2]);
+  rider.gait += horiz * dt / (horiz > 7.5 ? 3.2 : 2.3);
+  rider.air = ph.grounded ? Math.max(0, rider.air - dt * 6) : Math.min(1, rider.air + dt * 5);
+  // ---- camera
+  const tgt = add(rider.pos, [0, 2.1, 0]);
+  cam.target = lerp3(cam.target[0] === 0 && cam.target[2] === 0 ? tgt : cam.target, tgt, 1 - Math.exp(-dt * 10));
+  if (performance.now() - input.lastUserCam > 2500 && (state.auto || rider.speed > 1)) {
+    let d = rider.heading - cam.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); cam.yaw += d * (1 - Math.exp(-dt * 1.2));
+  }
+  let eye, look;
+  if (state.tour) { state.tourT += dt; [eye, look] = tourPose(state.tourT); }
+  else {
+    const cp = Math.cos(cam.pitch);
+    eye = sub(cam.target, scl([Math.sin(cam.yaw) * cp, -Math.sin(cam.pitch), Math.cos(cam.yaw) * cp], cam.dist));
+    eye[1] = Math.max(eye[1], H(eye[0], eye[2]) + 0.8);
+    look = add(cam.target, [0, 0.9, 0]);
+  }
+  if (window.__shotView) { eye = window.__shotView[0]; look = window.__shotView[1]; }
+  if (window.__shotFollow) { const k = window.__shotFollow, h = rider.heading, f = [Math.sin(h), 0, Math.cos(h)], r = [-f[2], 0, f[0]], p = rider.pos; eye = [p[0] + r[0] * k[0] + f[0] * k[1], p[1] + k[2], p[2] + r[2] * k[0] + f[2] * k[1]]; look = [p[0] + f[0] * (k[3] || 0), p[1] + 1.7, p[2] + f[2] * (k[3] || 0)]; }
+  const aspect = canvas.width / canvas.height, fov = (aspect < 1 ? 72 : cam.fov) * Math.PI / 180;
+  const proj = M4.persp(fov, aspect, 0.15, 4000), view = M4.lookAt(eye, look, [0, 1, 0]), VP = M4.mul(proj, view);
+  const viewInfo = { eye, projY: proj[5] };
+  // ---- lights: lantern + nearest static lights
+  const hd = rider.heading;
+  const root = M4.chain(M4.T(rider.pos[0], rider.pos[1], rider.pos[2]), M4.Ry(hd));
+  const bob = ph.grounded ? Math.sin(rider.gait * Math.PI * 4) * 0.045 * clamp(horiz / 8, 0, 1) : 0.03;
+  const pitchB = ph.grounded ? Math.sin(rider.gait * Math.PI * 2) * 0.035 * clamp(horiz / 8, 0, 1) : -ph.vel[1] * 0.012;
+  const bodyM = M4.chain(root, M4.T(0, bob + 0.0, 0), M4.Rx(pitchB));
+  const riderM = M4.chain(bodyM, M4.T(0, Math.sin(rider.gait * Math.PI * 4 + 0.6) * 0.03, 0));
+  rider.swingV += (-rider.swing * 40 - rider.swingV * 3 + (ph.grounded ? Math.sin(rider.gait * Math.PI * 4) * 6 * clamp(horiz / 8, 0, 1) : -ph.vel[1] * 0.8)) * dt;
+  rider.swing += rider.swingV * dt;
+  const lanternM = M4.chain(riderM, M4.T(-0.57, 2.08, 0.31), M4.Rx(rider.swing * 0.5 + rider.speed * 0.02), M4.Rz(rider.swing * 0.2));
+  const lpos = M4.apply(lanternM, [0, -0.27, 0]);
+  const flick = 1 + 0.06 * Math.sin(state.time * 13) + 0.04 * Math.sin(state.time * 31);
+  lightLP.set([lpos[0], lpos[1], lpos[2], 13]); lightLC.set([1.0, 0.6, 0.26, 1.0 * flick]);
+  const ref = state.tour ? eye : rider.pos;
+  const near = staticLights.filter(l => l.i > 0).map(l => [l, (l.p[0] - ref[0]) ** 2 + (l.p[2] - ref[2]) ** 2]).sort((x, y) => x[1] - y[1]).slice(0, 7);
+  for (let i = 1; i < 8; i++) { const l = near[i - 1]; if (l) { lightLP.set([...l[0].p, l[0].r], i * 4); lightLC.set([...l[0].c, l[0].i], i * 4); } else { lightLP.set([0, -999, 0, 0.001], i * 4); lightLC.set([0, 0, 0, 0], i * 4); } }
+  // ---- draw
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(0.08, 0.13, 0.3, 1); gl.clearDepth(1);
+  gl.depthMask(true); gl.colorMask(true, true, true, true);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE); gl.disable(gl.BLEND);
+  const planes = frustumPlanes(VP);
+  let drawn = 0;
+  if (HAS_AA) gl.enable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+  // 1) reflections (mirrored strokes) — later masked by the water surface
+  setCommon(progWorld, VP, viewInfo);
+  drawn += drawChunks(MIRRORset, planes, viewInfo);
+  gl.clear(gl.DEPTH_BUFFER_BIT);
+  gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+  // 2) water surface: darkens the reflections and blocks the river bed
+  setCommon(progSolid, VP, viewInfo);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.uniform4f(progSolid.u.uTint, 0.03, 0.06, 0.15, 0.42);
+  gl.bindVertexArray(waterSolid.vao); gl.drawElements(gl.TRIANGLES, waterSolid.count, gl.UNSIGNED_INT, 0);
+  gl.disable(gl.BLEND);
+  // 3) underpainting (solid silhouettes), pushed slightly back
+  gl.uniform4f(progSolid.u.uTint, 0, 0, 0, 0);
+  gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(2, 6);
+  gl.bindVertexArray(solids.vao); gl.drawElements(gl.TRIANGLES, solids.count, gl.UNSIGNED_INT, 0);
+  gl.disable(gl.POLYGON_OFFSET_FILL);
+  if (HAS_AA) gl.enable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+  // 4) opaque world strokes
+  setCommon(progWorld, VP, viewInfo);
+  drawn += drawChunks(Wset, planes, viewInfo);
+  // dynamic parts: windmill blades, horse, rider
+  const bladeM = M4.chain(M4.T(...bladeHub), M4.Ry(bladeYaw), M4.Rz(state.time * 0.55));
+  drawn += drawPart(bladePart, bladeM);
+  drawn += drawPart(HORSE.body, bodyM);
+  const gaitP = rider.gait, fast = horiz > 7.5, sp = clamp(horiz / 9, 0, 1);
+  const offs = fast ? [0.5, 0.6, 0.0, 0.1] : [0.0, 0.5, 0.5, 0.0];
+  HORSE.legs.forEach((L, i) => {
+    let swing, knee;
+    if (rider.air > 0.3 && !ph.grounded) { swing = L.kind === 'F' ? -0.65 : 0.55; knee = L.kind === 'F' ? 1.3 : -0.9; swing *= rider.air; knee *= rider.air; }
+    else {
+      const phs = (gaitP + offs[i]) * Math.PI * 2, amp = (fast ? 0.62 : 0.42) * sp;
+      swing = -Math.sin(phs) * amp;
+      const lift = Math.max(0, Math.cos(phs)) * sp;
+      knee = L.kind === 'F' ? lift * 1.1 : -lift * 0.7;
+    }
+    const upM = M4.chain(bodyM, M4.T(...L.hip), M4.Rx(swing));
+    drawn += drawPart(L.up, upM);
+    drawn += drawPart(L.lo, M4.chain(upM, M4.T(...L.knee), M4.Rx(knee)));
+  });
+  drawn += drawPart(HORSE.rider, riderM);
+  drawn += drawPart(HORSE.cape, riderM);
+  drawn += drawPart(HORSE.lantern, lanternM);
+  // 5) grass generated around the camera
+  setCommon(progGrass, VP, viewInfo);
+  const gc = state.tour ? eye : lerp3(eye, rider.pos, 0.6);
+  gl.uniform3f(progGrass.u.uGC, gc[0], 0, gc[2]); gl.uniform1f(progGrass.u.uGS, GRASS.S); gl.uniform1i(progGrass.u.uGSide, GRASS.side); gl.uniform1f(progGrass.u.uGR, GRASS.R);
+  if (eye[1] - H(eye[0], eye[2]) < 40) { gl.bindVertexArray(grassVAO); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, GRASS.count); drawn += GRASS.count; }
+  // 6) water strokes, blended
+  gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+  setCommon(progWorld, VP, viewInfo);
+  gl.uniform1f(progWorld.u.uAlphaCut, 0.02); gl.uniform1f(progWorld.u.uAlphaMul, 0.8);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+  drawn += drawChunks(WATERset, planes, viewInfo);
+  gl.depthMask(true); gl.disable(gl.BLEND);
+  // 7) sky, painted last behind everything
+  if (HAS_AA) gl.enable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+  setCommon(progSky, VP, viewInfo);
+  gl.bindVertexArray(SKY.vao); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, SKY.count); drawn += SKY.count;
+  gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+  gl.bindVertexArray(null);
+  state.drawn = drawn;
+  // ---- HUD
+  if ((state.hudT = (state.hudT || 0) + dt) > 0.25) {
+    state.hudT = 0;
+    $('stats').textContent = `FPS ${state.fps.toFixed(0)}　解析度 ${(state.scale * 100).toFixed(0)}% (${canvas.width}×${canvas.height})\n筆觸 ${(state.total / 1e6).toFixed(2)}M，本幀 ${(drawn / 1e3).toFixed(0)}k\n物理 ${ph.name}${state.tour ? '　巡遊中' : ''}`;
+  }
+}
+
+// ===================================================== BOOT
+async function boot() {
+  const physP = loadRapier().then(R => ({ R }), e => ({ err: e }));
+  const steps = [['鋪草地與小徑…', genTerrain], ['堆疊三層山脈…', genMountains], ['引一條河…', genRiver], ['砌石橋…', genBridge],
+    ['蓋村莊與教堂…', genVillage], ['立起風車…', genWindmill], ['種向日葵…', genSunflowers], ['收割麥田…', genWheat], ['栽柏樹…', genVegetation],
+    ['擺放柵欄、石牆、倒木…', genObstacles], ['畫星空漩渦…', genSky], ['為騎士與棕馬上色…', buildRider]];
+  for (const [msg, fn] of steps) { loadMsg(msg); await nextFrame(); fn(); }
+  loadMsg('上傳筆觸到顯示卡…'); await nextFrame();
+  state.total = W.n + WATER.n + MIRROR.n + SKY.n;
+  Wset = uploadChunked(W); WATERset = uploadChunked(WATER); MIRRORset = uploadChunked(MIRROR); uploadPlain(SKY);
+  solids.upload(); waterSolid.upload();
+  loadMsg('等待物理引擎…'); await nextFrame();
+  const a0 = -60 * Math.PI / 180, start = [Math.cos(a0) * RING_R, 0, Math.sin(a0) * RING_R]; start[1] = H(start[0], start[2]) + BALL_R + 0.05;
+  const res = await physP;
+  if (res.R) { try { state.physics = new RapierPhysics(res.R, start); } catch (e) { console.warn('Rapier init failed', e); } }
+  if (!state.physics) state.physics = new BuiltinPhysics(start);
+  rider.heading = -a0; cam.yaw = rider.heading;
+  if (params.has('tour')) setTour(true);
+  if (params.has('manual')) setAuto(false);
+  $('loading').style.display = 'none';
+  state.ready = true;
+  window.__starry = { state, cam, rider, keys, input, setTour, setAuto, tourPose, H, obstacles, simStep, get backend() { return state.physics.name; } };
+}
+boot().catch(e => { console.error(e); $('err').style.display = 'flex'; $('err').textContent = '載入失敗：' + e.message; });
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
